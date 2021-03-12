@@ -46,7 +46,6 @@ def _scaled(a, scale, x):
 def _chebyshev_accelerator(
     order: int, scale: float, a: ArrayFun, v: jnp.ndarray, av: jnp.ndarray
 ) -> jnp.ndarray:
-    order = 8  # HACK
     a_scaled = partial(_scaled, a, jnp.asarray(scale, v.dtype))
     for _ in range(order - 2):
         v, av = poly.iterate_chebyshev1(a_scaled, v, av)

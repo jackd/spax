@@ -95,6 +95,10 @@ def to_dense(mat: tp.Union[SparseArray, jnp.ndarray]) -> jnp.ndarray:
     return jnp.asarray(mat)
 
 
+def scale(mat: S, value: float) -> S:
+    return map_data(mat, lambda d: d * value)
+
+
 def scale_rows(mat: S, x: jnp.ndarray) -> S:
     return _delegate(mat, "scale_rows", mat, x)
 
