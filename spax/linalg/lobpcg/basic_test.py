@@ -26,7 +26,7 @@ class BasicLobpcgTest(jtu.JaxTestCase):
         w_expected = w_expected[:k]
         v_expected = v_expected[:, :k]
 
-        w_actual, v_actual, _ = lobpcg(A=a, B=B, X0=x0, largest=False, max_iters=200)
+        w_actual, v_actual, _ = lobpcg(A=a, B=B, X0=x0, largest=False, maxiters=200)
         self.assertAllClose(w_expected, w_actual, rtol=1e-8, atol=1e-10)
         self.assertAllClose(v_expected, v_actual, rtol=1e-4, atol=1e-10)
 

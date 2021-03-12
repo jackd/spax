@@ -76,17 +76,19 @@ class EighJVPTest(jtu.JaxTestCase):
 
         def eigh_coo_fwd(data, coords, shape):
             w, v = eigh_coo(data, coords, shape)
-            return (w, v), (w, v, data, coords, shape)
+            return (w, v), (w, v, data, coords)
 
         def eigh_coo_rev(res, g):
             grad_w, grad_v = g
-            w, v, data, coords, shape = res
+            n = grad_v.shape[0]
+            shape = (n, n)
+            w, v, data, coords = res
             a = COO(coords, data, shape)
             grad_data = vjp_lib.eigh_rev(
                 grad_w, grad_v, w, v, jax.tree_util.Partial(ops.masked_matmul, a)
             )
             grad_data = COO(coords, grad_data, shape)
-            grad_data = ops.symmetrize(grad_data).data
+            grad_data = ops.symmetrize_data(grad_data).data
             return (grad_data, None, None)
 
         eigh = jax.custom_vjp(eigh_coo)
@@ -126,7 +128,7 @@ class EighJVPTest(jtu.JaxTestCase):
                 grad_w, grad_v, w, v, jax.tree_util.Partial(ops.masked_matmul, a)
             )
             grad_data = ops.with_data(a, grad_data)
-            grad_data = ops.symmetrize(grad_data).data
+            grad_data = ops.symmetrize_data(grad_data).data
             return (grad_data, None, None)
 
         eigh = jax.custom_vjp(eigh_csr)
@@ -172,6 +174,12 @@ class EighJVPTest(jtu.JaxTestCase):
             rtol=1e-3,
         )
 
+        def squared_fun(a):
+            a = jnp.exp(a)
+            return eigh_partial_fun(a, k=k, largest=largest)
+
+        jtu.check_grads(squared_fun, (a,), 1, modes=["rev"])
+
     def test_eigh_partial_coo_vjp(self):
         dtype = np.float64
         n = 20
@@ -201,7 +209,7 @@ class EighJVPTest(jtu.JaxTestCase):
             )
 
             grad_data = ops.with_data(a, grad_data)
-            grad_data = ops.symmetrize(grad_data).data
+            grad_data = ops.symmetrize_data(grad_data).data
             return grad_data, None, None, None, None
 
         eigh_partial_fn = jax.custom_vjp(eigh_partial_coo)
@@ -225,7 +233,7 @@ class EighJVPTest(jtu.JaxTestCase):
 
         def eigh_partial_coo(data, indices, indptr, k: int, largest: bool):
             size = indptr.size - 1
-            a = ops.symmetrize(CSR(indices, indptr, data, (size, size))).todense()
+            a = ops.symmetrize_data(CSR(indices, indptr, data, (size, size))).todense()
             w, v = eigh_partial(a, k, largest)
             v = standardize_signs(v)
             return w, v
@@ -243,7 +251,7 @@ class EighJVPTest(jtu.JaxTestCase):
             grad_data, _ = vjp_lib.eigh_partial_rev(
                 grad_w, grad_v, w, v, x0, a, jax.tree_util.Partial(ops.masked_outer, a)
             )
-            grad_data = ops.symmetrize(ops.with_data(a, grad_data)).data
+            grad_data = ops.symmetrize_data(ops.with_data(a, grad_data)).data
             return grad_data, None, None, None, None
 
         eigh_partial_fn = jax.custom_vjp(eigh_partial_coo)

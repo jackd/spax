@@ -1,5 +1,5 @@
+import typing as tp
 from functools import partial
-from typing import Callable, NamedTuple, Optional, Tuple
 
 import jax
 import jax.numpy as jnp
@@ -25,7 +25,7 @@ def _sort_by_magnitude(w, v, largest=True):
     return w, v
 
 
-class SubspaceIterationInfo(NamedTuple):
+class SubspaceIterationInfo(tp.NamedTuple):
     err: jnp.ndarray
     iterations: int
 
@@ -46,14 +46,22 @@ def _scaled(a, scale, x):
 def _chebyshev_accelerator(
     order: int, scale: float, a: ArrayFun, v: jnp.ndarray, av: jnp.ndarray
 ) -> jnp.ndarray:
+    order = 8  # HACK
     a_scaled = partial(_scaled, a, jnp.asarray(scale, v.dtype))
     for _ in range(order - 2):
         v, av = poly.iterate_chebyshev1(a_scaled, v, av)
     return av
+    # with loops.Scope() as scope:
+    #     scope.v = v
+    #     scope.av = av
+    #     for _ in scope.range(order):
+    #         scope.v, scope.av = poly.iterate_chebyshev1(a_scaled, scope.v, scope.av)
+    #     av = scope.av
+    # return av
 
 
 def chebyshev_accelerator_fun(order: int, scale: float, a: ArrayOrFun):
-    assert order >= 2
+    # assert order >= 2
     return jax.tree_util.Partial(
         _chebyshev_accelerator, order, scale, utils.as_array_fun(a)
     )
@@ -62,10 +70,10 @@ def chebyshev_accelerator_fun(order: int, scale: float, a: ArrayOrFun):
 def basic_subspace_iteration(
     a: ArrayOrFun,
     v0: jnp.ndarray,
-    tol: Optional[float] = None,
-    max_iters: int = 1000,
-    accelerator: Callable = no_accelerator,
-) -> Tuple[jnp.ndarray, jnp.ndarray, SubspaceIterationInfo]:
+    tol: tp.Optional[float] = None,
+    maxiters: int = 1000,
+    accelerator: tp.Callable = no_accelerator,
+) -> tp.Tuple[jnp.ndarray, jnp.ndarray, SubspaceIterationInfo]:
     """
     See http://www.netlib.org/utk/people/JackDongarra/etemplates/node98.html
 
@@ -74,12 +82,12 @@ def basic_subspace_iteration(
         a: [m, m] matrix or matmul function to find the dominant eigenvpairs of.
         v0: [m, k] initial estimate of eigenvectors.
         tol: tolerance, defaults to eps ** 0.5 if not given.
-        max_iters: maximum number of iterations.
+        maxiters: maximum number of iterations.
 
     Returns:
         w: [k] eigenvalues.
         v: [m, k] eivenvectors.
-        info: `SubspaceIterationInfo`, `namedtuple` with
+        info: `SubspaceIterationInfo`, `tp.NamedTuple` with
             err: [k] error
             iterations: int
     """
@@ -91,7 +99,7 @@ def basic_subspace_iteration(
     def cond(state):
         w, v, av, err, iters = state
         del w, v, av
-        return jnp.logical_and(jnp.max(err) > tol, iters < max_iters)
+        return jnp.logical_and(jnp.max(err) > tol, iters < maxiters)
 
     def body(state):
         w, v, av, err, iters = state
@@ -112,20 +120,20 @@ def basic_subspace_iteration(
     return w, v, SubspaceIterationInfo(err, iters)
 
 
-@partial(jax.jit, static_argnums=0)
+# @partial(jax.jit, static_argnums=0)
 def chebyshev_subspace_iteration(
     order: int,
     scale: float,
     a: ArrayOrFun,
     v0: jnp.ndarray,
-    tol: Optional[float] = None,
-    max_iters: int = 1000,
+    tol: tp.Optional[float] = None,
+    maxiters: int = 1000,
 ):
     return basic_subspace_iteration(
         a,
         v0,
         tol=tol,
-        max_iters=max_iters,
+        maxiters=maxiters,
         accelerator=chebyshev_accelerator_fun(order, scale, a),
     )
 
@@ -133,10 +141,10 @@ def chebyshev_subspace_iteration(
 def projected_subspace_iteration(
     a: ArrayOrFun,
     v0: jnp.ndarray,
-    tol: Optional[float] = None,
-    max_iters: int = 1000,
-    accelerator: Callable = no_accelerator,
-) -> Tuple[jnp.ndarray, jnp.ndarray, SubspaceIterationInfo]:
+    tol: tp.Optional[float] = None,
+    maxiters: int = 1000,
+    accelerator: tp.Callable = no_accelerator,
+) -> tp.Tuple[jnp.ndarray, jnp.ndarray, SubspaceIterationInfo]:
     """Algorithm 5.3 from Saad 2011."""
     if tol is None:
         tol = default_tol(v0.dtype)
@@ -145,7 +153,7 @@ def projected_subspace_iteration(
     def cond(state):
         w, v, av, err, iters = state
         del w, v, av
-        return jnp.logical_and(jnp.max(err) > tol, iters < max_iters)
+        return jnp.logical_and(jnp.max(err) > tol, iters < maxiters)
 
     def body(state):
         w, v, av, err, iters = state
@@ -169,20 +177,20 @@ def projected_subspace_iteration(
     return w, v, SubspaceIterationInfo(err, iters)
 
 
-@partial(jax.jit, static_argnums=0)
+# @partial(jax.jit, static_argnums=0)
 def chebyshev_projected_subspace_iteration(
     order: int,
     scale: float,
     a: ArrayOrFun,
     v0: jnp.ndarray,
-    tol: Optional[float] = None,
-    max_iters: int = 1000,
+    tol: tp.Optional[float] = None,
+    maxiters: int = 1000,
 ):
     return projected_subspace_iteration(
         a,
         v0,
         tol=tol,
-        max_iters=max_iters,
+        maxiters=maxiters,
         accelerator=chebyshev_accelerator_fun(order, scale, a),
     )
 
@@ -190,11 +198,11 @@ def chebyshev_projected_subspace_iteration(
 def locking_projected_subspace_iteration(
     a: ArrayOrFun,
     v0: jnp.ndarray,
-    tol: Optional[float] = None,
-    max_iters: int = 1000,
-    accelerator: Callable = no_accelerator,
-    # locked: Optional[jnp.ndarray] = None,
-) -> Tuple[jnp.ndarray, jnp.ndarray, SubspaceIterationInfo]:
+    tol: tp.Optional[float] = None,
+    maxiters: int = 1000,
+    accelerator: tp.Callable = no_accelerator,
+    # locked: tp.Optional[jnp.ndarray] = None,
+) -> tp.Tuple[jnp.ndarray, jnp.ndarray, SubspaceIterationInfo]:
     if tol is None:
         tol = default_tol(v0.dtype)
     a = utils.as_array_fun(a)
@@ -209,7 +217,7 @@ def locking_projected_subspace_iteration(
     def cond(state):
         w, v, av, err, iters = state
         del w, v, av
-        return jnp.logical_and(iters < max_iters, err[0] > tol)
+        return jnp.logical_and(iters < maxiters, err[0] > tol)
 
     def body(locked, state):
         nl = locked.shape[1]

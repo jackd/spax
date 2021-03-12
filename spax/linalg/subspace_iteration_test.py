@@ -1,4 +1,4 @@
-from typing import Callable
+import typing as tp
 
 import jax
 import jax.numpy as jnp
@@ -26,7 +26,7 @@ def get_keys(n: int, seed: int = 0):
 class SubspaceIterationTest(jtu.JaxTestCase):
     def _test_subspace_iteration_method(
         self,
-        fun: Callable,
+        fun: tp.Callable,
         a: jnp.ndarray,
         v0: jnp.ndarray,
         tol=None,
@@ -59,7 +59,7 @@ class SubspaceIterationTest(jtu.JaxTestCase):
         # self.assertAllClose(v_actual, v_expected, atol=atol)
 
     def _test_subspace_iteration_method_random(
-        self, fun: Callable, dtype=np.float32, seed=0, m=50, k=10, tol=None, **kwargs
+        self, fun: tp.Callable, dtype=np.float32, seed=0, m=50, k=10, tol=None, **kwargs
     ):
         keys = get_keys(2)
         a = test_utils.random_symmetric_mat(keys[0], m, dtype)

@@ -3,22 +3,25 @@ from functools import partial
 
 import jax.numpy as jnp
 
-from spax.ops import bsr, coo, csr, ell
-from spax.sparse import BSR, COO, CSR, ELL, SparseArray
+from spax import utils
+from spax.ops import bsr, coo, csr, dense, ell
+from spax.sparse import COO, SparseArray
 
-S = tp.TypeVar("S", bound=SparseArray)
+S = tp.TypeVar("S", bound=tp.Union[SparseArray, jnp.ndarray])
 
 
 def _get_lib(mat: SparseArray):
-    if isinstance(mat, BSR):
-        return bsr
-    if isinstance(mat, COO):
+    if utils.is_coo(mat):
         return coo
-    if isinstance(mat, CSR):
+    if utils.is_bsr(mat):
+        return bsr
+    if utils.is_csr(mat):
         return csr
-    if isinstance(mat, ELL):
+    if utils.is_ell(mat):
         return ell
-    raise TypeError(f"Unrecognized SparseArray type {type(mat)}")
+    if utils.is_dense(mat):
+        return dense
+    raise TypeError(f"Unrecognized `SparseArray` type {type(mat)}")
 
 
 def _delegate(mat: SparseArray, method_name: str, *args, **kwargs):
@@ -68,7 +71,10 @@ def with_data(mat: S, data: jnp.ndarray) -> S:
 
 
 def map_data(mat: S, fun: tp.Callable[[jnp.ndarray], jnp.ndarray]) -> S:
-    return with_data(mat, fun(mat.data))
+    if hasattr(mat, "data"):
+        return with_data(mat, fun(mat.data))
+    mask = mat != 0
+    return mat.at[mask].set(fun(mat[mask]))
 
 
 def conj(mat: S) -> S:
@@ -109,9 +115,57 @@ def sum(mat: S, axis=None) -> jnp.ndarray:
     return _delegate(mat, "sum", mat, axis)
 
 
+def max(mat: S, axis=None) -> jnp.ndarray:
+    return _delegate(mat, "max", mat, axis)
+
+
 def boolean_mask(mat: S, mask: jnp.ndarray, axis: int = 0) -> S:
     return _delegate(mat, "boolean_mask", mat, mask, axis)
 
 
 def gather(mat: S, indices: jnp.ndarray, axis: int = 0) -> S:
     return _delegate(mat, "gather", mat, indices, axis)
+
+
+def symmetrize_data(mat: S) -> S:
+    return _delegate(mat, "symmetrize_data", mat)
+
+
+def norm(
+    mat: S, ord: tp.Union[int, str] = 2, axis: tp.Optional[int] = None
+) -> jnp.ndarray:
+    if axis is None:
+        raise NotImplementedError("`axis` must be provided")
+    if ord == 2:
+        return jnp.sqrt(sum(map_data(mat, lambda d: d * d.conj()), axis=axis))
+    if ord == 1:
+        return sum(abs(mat), axis=axis)
+    if ord == ord == jnp.inf:
+        return max(abs(mat), axis=axis)
+
+
+def to_dense(mat: S) -> jnp.ndarray:
+    if hasattr(mat, "todense"):
+        return mat.todense()
+    assert isinstance(mat, jnp.ndarray), type(mat)
+    return mat
+
+
+def cast(mat: S, dtype: jnp.ndarray):
+    if mat.dtype is dtype:
+        return mat
+    if utils.is_sparse(mat):
+        return with_data(mat, mat.data.astype(dtype))
+    return mat.astype(dtype)
+
+
+def softmax(mat: S, axis=-1):
+    return _delegate(mat, "softmax", mat, axis)
+
+
+def to_coo(mat: S) -> COO:
+    return _delegate(mat, "to_coo", mat)
+
+
+def get_coords(mat: S) -> jnp.ndarray:
+    return _delegate(mat, "get_coords", mat)

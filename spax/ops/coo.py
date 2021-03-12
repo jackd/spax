@@ -1,17 +1,27 @@
 import typing as tp
+from functools import partial
 
 import jax
 import jax.numpy as jnp
 
 from spax.sparse import COO, SparseArray
-from spax.utils import multiply_leading_dims, non_negative_axis
+from spax.utils import (
+    canonicalize_axis,
+    multiply_leading_dims,
+    segment_max,
+    segment_softmax,
+)
 
 
 def matmul(mat: COO, v) -> jnp.ndarray:
-    assert mat.ndim == 2
+    # assert mat.ndim == 2
+    # return jax.vmap(lambda m, vi: m.matvec(vi), (None, 1), 1)(mat, v)
     v = jnp.asarray(v)
     rows, cols = mat.coords
     dv = multiply_leading_dims(mat.data, v[cols])
+    out = jnp.zeros((mat.shape[0], *v.shape[1:]), dtype=dv.dtype)
+    at = out.at[rows]
+    return at.add(dv)
     return jnp.zeros((mat.shape[0], *v.shape[1:]), dtype=dv.dtype).at[rows].add(dv)
 
 
@@ -25,7 +35,7 @@ def transpose(mat: COO, axes=None) -> COO:
 
 
 def reorder_perm(coords: jnp.ndarray, shape) -> jnp.ndarray:
-    index1d = jnp.ravel_multi_index(coords, shape)
+    index1d = jnp.ravel_multi_index(coords, shape, mode="clip")
     return jnp.argsort(index1d)
 
 
@@ -46,12 +56,16 @@ def add_coo_(x1: COO, x2: COO) -> COO:
 
 
 def add_coo(x1: COO, x2: COO) -> COO:
-    """Sum of two COO matrices, converted to standard form."""
-    return standardize(add_coo_(x1, x2))
+    """
+    Sum of two COO matrices, reordered to standard form.
+
+    Duplicates are not removed. This allows it to be used in a jit context.
+    """
+    return reorder(add_coo_(x1, x2))
 
 
 def with_data(mat: COO, data: jnp.ndarray) -> COO:
-    assert mat.data.size == data.size
+    assert mat.data.shape == data.shape, (mat.data.shape, data.shape)
     return COO(mat.coords, data, mat.shape)
 
 
@@ -132,10 +146,19 @@ def masked_inner(mat: COO, x, y) -> jnp.ndarray:
 def masked_outer(mat: COO, x, y) -> jnp.ndarray:
     """Compute `(x @ y.T)[row, col]`."""
     assert mat.ndim == 2, mat.shape
-    assert x.ndim == 1, x.shape
-    assert y.ndim == 1, y.shape
     row, col = mat.coords
-    return x[row] * y[col]
+    if x.ndim == 1:
+        assert y.ndim == 1, (x.shape, y.shape)
+        return x[row] * y[col]
+    elif x.ndim == 2:
+        assert y.ndim == 2, (x.shape, y.shape)
+        assert (x.shape[0], y.shape[0]) == mat.shape and x.shape[1] == y.shape[1], (
+            x.shape,
+            y.shape,
+            mat.shape,
+        )
+        return (x[row] * y[col]).sum(axis=1)
+    raise ValueError(f"x and y must each be rank 1 or 2, got {x.shape}")
 
 
 def masked_data(mat: COO, x: jnp.ndarray) -> jnp.ndarray:
@@ -162,23 +185,33 @@ def subtract(mat: COO, other) -> COO:
     return add(mat, -other)
 
 
-def sum(mat: COO, axis=None) -> jnp.ndarray:
-    if axis is None:
-        return mat.data.sum()
+def _reduce(mat: COO, axis, segment_reduction: tp.Callable) -> jnp.ndarray:
     if mat.ndim != 2:
         raise NotImplementedError("TODO")
     if not isinstance(axis, int):
         raise NotImplementedError("TODO")
-    axis = non_negative_axis(axis, mat.ndim)
+    axis = canonicalize_axis(axis, mat.ndim)
     if axis == 0:
         not_axis = 1
     elif axis == 1:
         not_axis = 0
     else:
         raise NotImplementedError("TODO")
-    return jax.ops.segment_sum(
+    return segment_reduction(
         mat.data, mat.coords[not_axis], num_segments=mat.shape[not_axis]
     )
+
+
+def sum(mat: COO, axis=None) -> jnp.ndarray:
+    if axis is None:
+        return mat.data.sum()
+    return _reduce(mat, axis, jax.ops.segment_sum)
+
+
+def max(mat: COO, axis=None) -> jnp.ndarray:
+    if axis is None:
+        return mat.data.max()
+    return _reduce(mat, axis, partial(segment_max, initial=0))
 
 
 def _boolean_mask(
@@ -203,12 +236,24 @@ def _boolean_mask(
 def boolean_mask(mat: COO, mask: jnp.ndarray, axis: int = 0):
     mask = jnp.asarray(mask, dtype=bool)
     assert mask.ndim == 1, mask.shape
-    axis = non_negative_axis(axis, mat.ndim)
+    axis = canonicalize_axis(axis, mat.ndim)
     (valid_indices,) = jnp.where(mask)
     return _boolean_mask(mat, mask, valid_indices, axis)
 
 
 def gather(mat: COO, indices: jnp.ndarray, axis: int = 0):
-    axis = non_negative_axis(axis, mat.ndim)
+    axis = canonicalize_axis(axis, mat.ndim)
     mask = jnp.zeros((mat.shape[axis],), bool).at[indices].set(True)
     return _boolean_mask(mat, mask, indices, axis)
+
+
+def softmax(mat: COO, axis: int = -1) -> COO:
+    return with_data(mat, segment_softmax(mat.data, mat.coords[axis], mat.shape[axis]))
+
+
+def to_coo(coo: COO) -> COO:
+    return coo
+
+
+def get_coords(mat: COO) -> jnp.ndarray:
+    return mat.coords

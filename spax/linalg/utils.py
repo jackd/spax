@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 
-from spax import ops, sparse
+from spax import is_sparse, ops
 from spax.types import ArrayFun, ArrayOrFun
 
 
@@ -44,7 +44,7 @@ def as_array_fun(a: ArrayOrFun) -> ArrayFun:
     if callable(a):
         return a
     assert a.ndim == 2, a.shape
-    if isinstance(a, sparse.SparseArray):
+    if is_sparse(a):
         return jax.tree_util.Partial(ops.matmul, a)
     if isinstance(a, jnp.ndarray):
         return jax.tree_util.Partial(jnp.matmul, a)

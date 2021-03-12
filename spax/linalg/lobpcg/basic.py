@@ -1,5 +1,5 @@
+import typing as tp
 from functools import partial
-from typing import NamedTuple, Optional, Tuple
 
 import jax
 import jax.numpy as jnp
@@ -9,7 +9,7 @@ from spax.linalg.utils import as_array_fun, standardize_signs
 from spax.types import ArrayFun, ArrayOrFun
 
 
-class BasicInfo(NamedTuple):
+class BasicInfo(tp.NamedTuple):
     iterations: int
     success: bool
 
@@ -17,13 +17,13 @@ class BasicInfo(NamedTuple):
 def lobpcg(
     A: ArrayOrFun,
     X0: jnp.ndarray,
-    B: Optional[ArrayOrFun] = None,
-    iK: Optional[ArrayOrFun] = None,
+    B: tp.Optional[ArrayOrFun] = None,
+    iK: tp.Optional[ArrayOrFun] = None,
     largest: bool = False,
-    k: Optional[int] = None,
-    tol: Optional[float] = None,
-    max_iters: int = 1000,
-) -> Tuple[jnp.ndarray, jnp.ndarray, BasicInfo]:
+    k: tp.Optional[int] = None,
+    tol: tp.Optional[float] = None,
+    maxiters: int = 1000,
+) -> tp.Tuple[jnp.ndarray, jnp.ndarray, BasicInfo]:
     """
     Find some of the eigenpairs for the generalized eigenvalue problem (A, B).
 
@@ -32,16 +32,16 @@ def lobpcg(
             `[m, m]` hermitian matrix.
         X0: `[m, n]`, `k <= n < m`. Initial guess of eigenvectors.
         B: same type as A. If not given, identity is used.
-        iK: Optional inverse preconditioner. If not given, identity is used.
+        iK: tp.Optional inverse preconditioner. If not given, identity is used.
         largest: if True, return the largest `k` eigenvalues, otherwise the smallest.
         k: number of eigenpairs to return. Uses `n` if not provided.
         tol: tolerance for convergence.
-        max_iters: maximum number of iterations.
+        maxiters: maximum number of iterations.
 
     Returns:
         w: [k] smallest/largest eigenvalues of generalized eigenvalue problem `(A, B)`.
         v: [n, k] eigenvectors associated with `w`. `v[:, i]` matches `w[i]`.
-        info: `BasicInfo` `namedtuple` with `(iterations: int, success: bool)`.
+        info: `BasicInfo` `tp.NamedTuple` with `(iterations: int, success: bool)`.
     """
     # Perform argument checks and fix default / computed arguments
     if B is not None:
@@ -66,10 +66,10 @@ def lobpcg(
         tol = utils.default_tol(X0.dtype)
 
     k = k or X0.shape[1]
-    return _lobpcg(A, X0, B, iK, largest, k, tol, max_iters, A_norm, B_norm)
+    return _lobpcg(A, X0, B, iK, largest, k, tol, maxiters, A_norm, B_norm)
 
 
-class _BasicState(NamedTuple):
+class _BasicState(tp.NamedTuple):
     iteration: int
     eig_vals: jnp.ndarray  # [n]
     X: jnp.ndarray  # [m, n]
@@ -86,10 +86,10 @@ def _lobpcg(
     largest: bool,
     k: int,
     tol: float,
-    max_iters: int,
+    maxiters: int,
     A_norm: float,
     B_norm: float,
-) -> Tuple[jnp.ndarray, jnp.ndarray, BasicInfo]:
+) -> tp.Tuple[jnp.ndarray, jnp.ndarray, BasicInfo]:
     m, nx = X0.shape
     dtype = X0.dtype
     rayleigh_ritz = partial(utils.rayleigh_ritz, A=A, B=B, largest=largest)
@@ -102,7 +102,7 @@ def _lobpcg(
         rerr = compute_residual_error(s.R, s.eig_vals, s.X)
         num_converged = jnp.count_nonzero(rerr < tol)
         return jnp.logical_and(
-            jnp.logical_and(s.iteration < max_iters, num_converged < k),
+            jnp.logical_and(s.iteration < maxiters, num_converged < k),
             jnp.logical_not(s.failed),
         )
 
@@ -146,6 +146,6 @@ def _lobpcg(
         v,
         BasicInfo(
             state.iteration,
-            jnp.logical_and(jnp.logical_not(state.failed), state.iteration < max_iters),
+            jnp.logical_and(jnp.logical_not(state.failed), state.iteration < maxiters),
         ),
     )

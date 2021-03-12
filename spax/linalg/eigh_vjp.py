@@ -1,10 +1,10 @@
 import jax
 import jax.numpy as jnp
 
-from spax import ops
+from spax import ops, utils
+from spax.linalg.solve import cg_least_squares
 from spax.linalg.utils import as_array_fun
-from spax.sparse import SparseArray
-from spax.types import ArrayOrFun
+from spax.sparse import COO, CSR, SparseArray
 
 
 def project(x, v):
@@ -28,13 +28,6 @@ def eigh_rev(grad_w, grad_v, w, v, matmul_fun=jnp.matmul):
     return matmul_fun(v, inner @ vt)
 
 
-def least_squares_cg(a: ArrayOrFun, b: jnp.ndarray, x0: jnp.ndarray, **kwargs):
-    a = as_array_fun(a)
-    ata = lambda x: a(a(x).conj()).conj()
-    l0, info = jax.scipy.sparse.linalg.cg(ata, a(b.conj()).conj(), x0, **kwargs)
-    return l0, info
-
-
 def eigh_single_rev(
     grad_w, grad_v, w, v, x0, a, outer_impl: jnp.outer, tol: float = 1e-5
 ):
@@ -54,12 +47,12 @@ def eigh_single_rev(
         x0_: solution to least squares problem solved.
     """
     a = as_array_fun(a)
-    g0 = grad_w * outer_impl(v.conj(), v)
+    grad_w * v.conj()
 
-    def if_zeros(operand):
-        grad_v, w, v, x0 = operand
-        del grad_v, v, w
-        return x0, jnp.zeros_like(g0)
+    # def if_zeros(operand):
+    #     grad_v, w, v, x0 = operand
+    #     del grad_v, v, w
+    #     return x0, jnp.zeros_like(g0)
 
     def otherwise(operand):
         grad_v, w, v, x0 = operand
@@ -69,16 +62,20 @@ def eigh_single_rev(
 
         # Find a solution lambda_0 using least-squares conjugate gradient
         # (A - w*I) @ x = proj(grad_v)
-        (l0, _) = least_squares_cg(
+        (l0, _) = cg_least_squares(
             lambda x: a(x.conj()).conj() - x * w, proj(grad_v), x0=x0, atol=0, tol=tol
         )
         # Project to correct for round-off errors
         l0 = proj(l0)
-        return l0, -outer_impl(l0, v)
+        return l0
 
     operand = grad_v, w, v, x0
-    x0_, g1 = jax.lax.cond(jnp.all(grad_v == 0), if_zeros, otherwise, operand)
-    return g0 + g1, x0_
+    # x0_, g1 = jax.lax.cond(jnp.all(grad_v == 0), if_zeros, otherwise, operand)
+    l0 = otherwise(operand)
+
+    z = grad_w * v.conj() - l0
+    grad_data = outer_impl(z, v)
+    return grad_data, l0
 
 
 def eigh_partial_rev(
@@ -106,62 +103,48 @@ def eigh_partial_rev(
     )(grad_w, grad_v, w, v, x0)
     grad_a = jnp.sum(grad_a, axis=0)
     return grad_a, x0
-    # a = as_array_fun(a)
-    # grad_As = []
 
-    # grad_As.append(
-    #     jax.vmap(lambda grad_wi, vi: grad_wi * outer_impl(vi.conj(), vi), (0, 1))(
-    #         grad_w, v
-    #     ).sum(0)
-    # )
-    # if grad_v is not None:
-    #     # Add eigenvector part only if non-zero backward signal is present.
-    #     # This can avoid NaN results for degenerate cases if the function
-    #     # depends on the eigenvalues only.
 
-    #     def f_inner(grad_vi, wi, vi, x0i):
-    #         def if_any(operand):
-    #             grad_vi, wi, vi, x0i = operand
+def _eigh_partial_rev_coo(grad_w, grad_v, w, v, x0, coords, data, tol: float = 1e-5):
+    a = COO(coords, data, (v.shape[0],) * 2)
+    return eigh_partial_rev(
+        grad_w,
+        grad_v,
+        w,
+        v,
+        x0,
+        a,
+        jax.tree_util.Partial(ops.coo.masked_outer, a),
+        tol=tol,
+    )
 
-    #             # Amat = (a - wi * jnp.eye(m, dtype=a.dtype)).T
-    #             adjoint_fun = lambda x: (a(x.conj())).conj() - wi * x
 
-    #             # Projection operator on space orthogonal to v
-    #             proj = projector(vi)
+def eigh_partial_rev_coo(grad_w, grad_v, w, v, x0, a: COO, tol: float = 1e-5):
+    return _eigh_partial_rev_coo(grad_w, grad_v, w, v, x0, a.coords, a.data, tol=tol)
 
-    #             # Find a solution lambda_0 using conjugate gradient
-    #             (l0, _) = jax.scipy.sparse.linalg.cg(
-    #                 adjoint_fun, proj(grad_vi), x0=proj(x0i), atol=0, tol=tol
-    #             )
-    #             # (l0, _) = jax.scipy.sparse.linalg.gmres(
-    #             #     adjoint_fun, proj(grad_vi), x0=proj(x0i)
-    #             # )
-    #             # l0 = jax.numpy.linalg.lstsq(Amat, P(grad_vi))[0]
-    #             # Project to correct for round-off errors
-    #             l0 = proj(l0)
-    #             return -outer_impl(l0, vi), l0
 
-    #         def if_none(operand):
-    #             x0i = operand[-1]
-    #             return jnp.zeros_like(grad_As[0]), x0i
+def _eigh_partial_rev_csr(
+    grad_w, grad_v, w, v, x0, indices, indptr, data, tol: float = 1e-5
+):
+    shape = (indptr.shape[0] - 1, v.shape[0])
+    a = CSR(indices, indptr, data, shape)
+    return eigh_partial_rev(
+        grad_w,
+        grad_v,
+        w,
+        v,
+        x0,
+        a,
+        jax.tree_util.Partial(ops.csr.masked_outer, a),
+        tol=tol,
+    )
 
-    #         operand = (grad_vi, wi, vi, x0i)
-    #         # return if_any(operand) if jnp.any(grad_vi) else if_none(operand)
-    #         return jax.lax.cond(jnp.any(grad_vi), if_any, if_none, operand)
 
-    #     # x0s = []
-    #     # for k in range(grad_v.shape[1]):
-    #     #     out = f_inner(grad_v[:, k], w[k], v[:, k], x0[:, k])
-    #     #     grad_As.append(out[0])
-    #     #     x0s.append(out[1])
-    #     # x0 = jnp.stack(x0s, axis=0)
-    #     # TODO: revert the above back to using vmap
-    #     # it seems to cause issues with jax2tf.convert
-    #     grad_a, x0 = jax.vmap(f_inner, in_axes=(1, 0, 1, 1), out_axes=(0, 1))(
-    #         grad_v, w, v, x0
-    #     )
-    #     grad_As.append(grad_a.sum(0))
-    # return sum(grad_As), x0
+def eigh_partial_rev_csr(grad_w, grad_v, w, v, x0, a: CSR, tol: float = 1e-5):
+    assert a.shape == (grad_v.shape[0],) * 2
+    return _eigh_partial_rev_csr(
+        grad_w, grad_v, w, v, x0, a.indices, a.indptr, a.data, tol=tol
+    )
 
 
 def eigh_partial_rev_sparse(
@@ -180,7 +163,10 @@ def eigh_partial_rev_sparse(
         grad_data: gradient of `data` input, same `shape` and `dtype`
         x0_: solution to least squares problem.
     """
-    outer_impl = jax.tree_util.Partial(ops.masked_outer, a)
-    a = as_array_fun(a)
-    grad_data, x0 = eigh_partial_rev(grad_w, grad_v, w, v, x0, a, outer_impl, tol=tol)
-    return grad_data, x0
+    if utils.is_coo(a):
+        fun = eigh_partial_rev_coo
+    elif utils.is_csr(a):
+        fun = eigh_partial_rev_csr
+    else:
+        raise NotImplementedError("Only coo supported")
+    return fun(grad_w, grad_v, w, v, x0, a, tol=tol)

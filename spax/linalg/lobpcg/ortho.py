@@ -1,5 +1,5 @@
+import typing as tp
 from functools import partial
-from typing import NamedTuple, Optional, Tuple
 
 import jax
 import jax.numpy as jnp
@@ -9,7 +9,7 @@ from spax.linalg.utils import as_array_fun, standardize_signs
 from spax.types import ArrayFun, ArrayOrFun
 
 
-class OrthoState(NamedTuple):
+class OrthoState(tp.NamedTuple):
     iterations: int
     theta: jnp.ndarray
     X: jnp.ndarray
@@ -23,17 +23,17 @@ class OrthoState(NamedTuple):
 def lobpcg(
     A: ArrayOrFun,
     X0: jnp.ndarray,
-    B: Optional[ArrayOrFun] = None,
-    # iK: Optional[ArrayOrFun] = None,
+    B: tp.Optional[ArrayOrFun] = None,
+    # iK: tp.Optional[ArrayOrFun] = None,
     largest: bool = False,
-    k: Optional[int] = None,
-    tol: Optional[float] = None,
-    max_iters: int = 1000,
-    tau_ortho: Optional[float] = None,
-    tau_replace: Optional[float] = None,
-    tau_drop: Optional[float] = None,
-    # tau_skip: Optional[float] = None,
-) -> Tuple[jnp.ndarray, jnp.ndarray, OrthoState]:
+    k: tp.Optional[int] = None,
+    tol: tp.Optional[float] = None,
+    maxiters: int = 1000,
+    tau_ortho: tp.Optional[float] = None,
+    tau_replace: tp.Optional[float] = None,
+    tau_drop: tp.Optional[float] = None,
+    # tau_skip: tp.Optional[float] = None,
+) -> tp.Tuple[jnp.ndarray, jnp.ndarray, OrthoState]:
     """
     Find some of the eigenpairs for the generalized eigenvalue problem (A, B).
 
@@ -42,11 +42,11 @@ def lobpcg(
             `[m, m]` hermitian matrix.
         X0: `[m, n]`, `k <= n < m`. Initial guess of eigenvectors.
         B: same type as A. If not given, identity is used.
-        iK: Optional inverse preconditioner. If not given, identity is used.
+        iK: tp.Optional inverse preconditioner. If not given, identity is used.
         largest: if True, return the largest `k` eigenvalues, otherwise the smallest.
         k: number of eigenpairs to return. Uses `n` if not provided.
         tol: tolerance for convergence.
-        max_iters: maximum number of iterations.
+        maxiters: maximum number of iterations.
         tau_*: solver parameters.
 
     Returns:
@@ -92,7 +92,7 @@ def lobpcg(
         largest,
         k,
         tol,
-        max_iters,
+        maxiters,
         A_norm,
         B_norm,
         tau_ortho=tau_ortho or tol,
@@ -110,14 +110,14 @@ def _lobpcg(
     largest: bool,
     k: int,
     tol: float,
-    max_iters: int,
+    maxiters: int,
     A_norm: float,
     B_norm: float,
     tau_ortho: float,
     tau_replace: float,
     tau_drop: float,
     # tau_skip: float,
-) -> Tuple[jnp.ndarray, jnp.ndarray, OrthoState]:
+) -> tp.Tuple[jnp.ndarray, jnp.ndarray, OrthoState]:
     m, nx = X0.shape
     dtype = X0.dtype
     compute_residual = partial(utils.compute_residual, A=A, B=B)
@@ -155,7 +155,7 @@ def _lobpcg(
     del theta
 
     def cond(s: OrthoState):
-        return jnp.logical_and(s.iterations < max_iters, s.num_converged < k)
+        return jnp.logical_and(s.iterations < maxiters, s.num_converged < k)
 
     def body(s: OrthoState):
         XP = jnp.concatenate((s.X, s.P), axis=1)
@@ -207,7 +207,7 @@ def _lobpcg(
     return jax.lax.cond(pred, if_converged, otherwise, state)
 
     # use_ortho = False
-    # while nc < k and iters < max_iters:
+    # while nc < k and iters < maxiters:
     #     iters += 1
     #     if use_ortho:
     #         W = utils.ortho_drop(

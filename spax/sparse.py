@@ -31,6 +31,16 @@ def _prod(iterable, *, start=1):
     return result
 
 
+# class _SparseArrayMeta(abc.ABCMeta):  # type: ignore
+#     """Metaclass for overriding ndarray isinstance checks."""
+
+#     def __instancecheck__(self, instance):
+#         try:
+#             return super().__instancecheck__(instance.aval)
+#         except AttributeError:
+#             return super().__instancecheck__(instance, SparseArray)
+
+
 class SparseArray(abc.ABC):
     @abc.abstractclassmethod
     def fromdense(cls, x):
@@ -104,11 +114,14 @@ class COO(SparseArray):
         self.data = jnp.asarray(data)
         if shape is None:
             shape = tuple(1 + self.coords.max(1, initial=-1))
+        else:
+            shape = tuple(int(s) for s in shape)
         self._shape = shape
 
         assert self.data.ndim == 1
         assert self.coords.ndim == 2
         assert self.coords.shape == (len(shape), self.data.shape[0])
+        assert jnp.issubdtype(self.coords.dtype, jnp.integer)
 
     @property
     def aval(self):
@@ -153,7 +166,7 @@ class COO(SparseArray):
         if len(row) == 0:
             return CSR(row, jnp.zeros(self.shape[0] + 1, row.dtype), data, self.shape)
         indices = jnp.ravel(col)
-        indptr = jnp.cumsum(jnp.bincount(row))
+        indptr = jnp.cumsum(jnp.bincount(row, length=self.shape[0]))
         indptr = jnp.concatenate(
             [
                 jnp.zeros(1, indptr.dtype),
@@ -169,7 +182,7 @@ class COO(SparseArray):
 
 
 class AbstractCOO(core.ShapedArray):
-    __slots__ = ["index_dtype", "nnz", "data_aval", "coords_aval"]
+    __slots__ = ["index_dtype", "nnz", "data_aval", "coords_aval", "matvec_aval"]
     _num_buffers = 2
 
     def __init__(self, shape, dtype, index_dtype, nnz):
@@ -189,17 +202,19 @@ class AbstractCOO(core.ShapedArray):
 
     @core.aval_method
     def matvec(self, v):
-        return coo_matvec_p.impl(self, v)
+        return coo_matvec_p.bind(self, v)
 
 
 def coo_result_handler(device, aval):
     def build_coo_array(coords_buf, data_buf):
-        data = xla.DeviceArray(
-            aval.data_aval, device, lazy.array(aval.data_aval.shape), data_buf
-        )
-        coords = xla.DeviceArray(
+        # NOTE: changes to original, xla.DeviceArray -> xla.make_device_array
+        coords = xla.make_device_array(
             aval.coords_aval, device, lazy.array(aval.coords_aval.shape), coords_buf
         )
+        data = xla.make_device_array(
+            aval.data_aval, device, lazy.array(aval.data_aval.shape), data_buf
+        )
+
         return COO(coords, data, shape=aval.shape)
 
     return build_coo_array
@@ -297,8 +312,12 @@ class CSR(SparseArray):
         self.data = jnp.array(data)
         if shape is None:
             shape = (len(self.indptr) - 1, self.indices.max(initial=-1) + 1)
+        else:
+            shape = tuple(int(s) for s in shape)
         self._shape = shape
 
+        assert jnp.issubdtype(indices.dtype, jnp.integer)
+        assert jnp.issubdtype(indptr.dtype, jnp.integer)
         assert len(shape) == 2, shape
         assert self.data.ndim == 1, self.data.shape
         assert self.indices.shape == self.data.shape, (
@@ -306,10 +325,10 @@ class CSR(SparseArray):
             self.data.shape,
         )
         assert shape[0] == len(self.indptr) - 1, (shape, len(self.indptr) - 1)
-        assert shape[1] > self.indices.max(initial=-1), (
-            shape,
-            self.indices.max(initial=-1),
-        )
+        # assert shape[1] > self.indices.max(initial=-1), (
+        #     shape,
+        #     self.indices.max(initial=-1),
+        # )
 
     @property
     def aval(self):
@@ -349,7 +368,11 @@ class CSR(SparseArray):
         return BSR.fromdense(self.todense(), blocksize=blocksize)
 
     def tocoo(self):
-        row = jnp.repeat(jnp.arange(self.shape[0]), jnp.diff(self.indptr))
+        row = jnp.repeat(
+            jnp.arange(self.shape[0]),
+            jnp.diff(self.indptr),
+            total_repeat_length=self.nnz,
+        )
         col = self.indices
         return COO(jnp.vstack([row, col]), self.data, self.shape)
 
@@ -367,7 +390,14 @@ class CSR(SparseArray):
 
 
 class AbstractCSR(core.ShapedArray):
-    __slots__ = ["index_dtype", "nnz", "data_aval", "indices_aval", "indptr_aval"]
+    __slots__ = [
+        "index_dtype",
+        "nnz",
+        "data_aval",
+        "indices_aval",
+        "indptr_aval",
+        "matvec_aval",
+    ]
     _num_buffers = 3
 
     def __init__(self, shape, dtype, index_dtype, nnz):
@@ -392,21 +422,22 @@ class AbstractCSR(core.ShapedArray):
 
     @core.aval_method
     def matvec(self, v):
-        return csr_matvec_p.impl(self, v)
+        return csr_matvec_p.bind(self, v)
 
 
 def csr_result_handler(device, aval):
     def build_csr_array(data_buf, indices_buf, indptr_buf):
-        data = xla.DeviceArray(
+        # NOTE: changes to original, xla.DeviceArray -> xla.make_device_array
+        data = xla.make_device_array(
             aval.data_aval, device, lazy.array(aval.data_aval.shape), data_buf
         )
-        indices = xla.DeviceArray(
+        indices = xla.make_device_array(
             aval.indices_aval, device, lazy.array(aval.indices_aval.shape), indices_buf
         )
-        indptr = xla.DeviceArray(
+        indptr = xla.make_device_array(
             aval.indptr_aval, device, lazy.array(aval.indptr_aval.shape), indices_buf
         )
-        return CSR(data, indices, indptr, shape=aval.shape)
+        return CSR(indices, indptr, data, shape=aval.shape)
 
     return build_csr_array
 
@@ -479,7 +510,9 @@ def csr_fromdense(cls, mat):
 
 def csr_todense(mat):
     d = jnp.zeros(mat.shape, mat.dtype)
-    row = jnp.repeat(jnp.arange(mat.shape[0]), jnp.diff(mat.indptr))
+    row = jnp.repeat(
+        jnp.arange(mat.shape[0]), jnp.diff(mat.indptr), total_repeat_length=mat.nnz
+    )
     col = mat.indices
     return d.at[row, col].add(mat.data)
 
@@ -579,7 +612,14 @@ class ELL(SparseArray):
 
 
 class AbstractELL(core.ShapedArray):
-    __slots__ = ["index_dtype", "nnz", "data_aval", "rownz_aval", "columns_aval"]
+    __slots__ = [
+        "index_dtype",
+        "nnz",
+        "data_aval",
+        "rownz_aval",
+        "columns_aval",
+        "matvec_aval",
+    ]
     _num_buffers = 3
 
     def __init__(self, shape, dtype, index_dtype, nnz, row_max_nz):
@@ -604,15 +644,16 @@ class AbstractELL(core.ShapedArray):
 
     @core.aval_method
     def matvec(self, v):
-        return ell_matvec_p.impl(self, v)
+        return ell_matvec_p.bind(self, v)
 
 
 def ell_result_handler(device, aval):
     def build_ell_array(columns_buf, data_buf):
-        data = xla.DeviceArray(
+        # NOTE: changes to original, xla.DeviceArray -> xla.make_device_array
+        data = xla.make_device_array(
             aval.data_aval, device, lazy.array(aval.data_aval.shape), data_buf
         )
-        columns = xla.DeviceArray(
+        columns = xla.make_device_array(
             aval.columns_aval, device, lazy.array(aval.columns_aval.shape), columns_buf
         )
         return ELL(rownz=aval.rownz, columns=columns, data=data, shape=aval.shape)
@@ -808,6 +849,7 @@ class AbstractBSR(core.ShapedArray):
         "data_aval",
         "indices_aval",
         "indptr_aval",
+        "matvec_aval",
     ]
     _num_buffers = 3
 
@@ -834,18 +876,19 @@ class AbstractBSR(core.ShapedArray):
 
     @core.aval_method
     def matvec(self, v):
-        return bsr_matvec_p.impl(self, v)
+        return bsr_matvec_p.bind(self, v)
 
 
 def bsr_result_handler(device, aval):
     def build_bsr_array(data_buf, indices_buf, indptr_buf):
-        data = xla.DeviceArray(
+        # NOTE: changes to original, xla.DeviceArray -> xla.make_device_array
+        data = xla.make_device_array(
             aval.data_aval, device, lazy.array(aval.data_aval.shape), data_buf
         )
-        indices = xla.DeviceArray(
+        indices = xla.make_device_array(
             aval.indices_aval, device, lazy.array(aval.indices_aval.shape), indices_buf
         )
-        indptr = xla.DeviceArray(
+        indptr = xla.make_device_array(
             aval.indptr_aval, device, lazy.array(aval.indptr_aval.shape), indices_buf
         )
         return BSR(data, indices, indptr, shape=aval.shape)

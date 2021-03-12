@@ -1,18 +1,33 @@
 import typing as tp
 
+import jax
 import jax.numpy as jnp
 
 from spax.ops import coo as coo_lib
 from spax.sparse import CSR
-from spax.utils import multiply_leading_dims
+from spax.utils import canonicalize_axis
+
+
+def _matvec_components(indices, indptr, data, v):
+    dv = data * v[indices]
+    size = indptr.size - 1
+    ind = jnp.cumsum(jnp.zeros_like(indices).at[indptr].add(1))
+    return jnp.zeros(size, dv.dtype).at[ind - 1].add(dv)
 
 
 def matmul(mat: CSR, v) -> jnp.ndarray:
+    # HACK
     assert mat.ndim == 2
     v = jnp.asarray(v)
-    dv = multiply_leading_dims(mat.data, v[mat.indices])
-    ind = jnp.cumsum(jnp.zeros_like(mat.indices).at[mat.indptr].add(1))
-    return jnp.zeros((mat.shape[0], *v.shape[1:]), dv.dtype).at[ind - 1].add(dv)
+    if v.ndim == 1:
+        return _matvec_components(mat.indices, mat.indptr, mat.data, v)
+    assert v.ndim == 2
+    return jax.vmap(_matvec_components, (None, None, None, 1), 1)(
+        mat.indices, mat.indptr, mat.data, v
+    )
+    # dv = multiply_leading_dims(mat.data, v[mat.indices])
+    # ind = jnp.cumsum(jnp.zeros_like(mat.indices).at[mat.indptr].add(1))
+    # return jnp.zeros((mat.shape[0], *v.shape[1:]), dv.dtype).at[ind - 1].add(dv)
 
 
 def transpose(mat: CSR, axes=None) -> CSR:
@@ -21,9 +36,10 @@ def transpose(mat: CSR, axes=None) -> CSR:
 
 def add(mat: CSR, other) -> tp.Union[CSR, jnp.ndarray]:
     out = coo_lib.add(mat.tocoo(), other)
-    if isinstance(out, jnp.ndarray):
-        return out
-    return out.tocsr()
+    if hasattr(out, "tocsr"):
+        return out.tocsr()
+    # dense array
+    return out
 
 
 def mul(mat: CSR, other) -> CSR:
@@ -43,7 +59,7 @@ def _repeated_rows(
 ):
     if nnz is None:
         nnz = indptr[-1]
-    return jnp.repeat(x, indptr[1:] - indptr[:-1], axis=axis, total_repeat_length=nnz)
+    return jnp.repeat(x, jnp.diff(indptr), axis=axis, total_repeat_length=nnz)
 
 
 def masked_inner(mat: CSR, x: jnp.ndarray, y: jnp.ndarray) -> jnp.ndarray:
@@ -58,13 +74,19 @@ def masked_inner(mat: CSR, x: jnp.ndarray, y: jnp.ndarray) -> jnp.ndarray:
 def masked_outer(mat: CSR, x: jnp.ndarray, y: jnp.ndarray) -> jnp.ndarray:
     """Compute (x @ y.T)[row, col] where (row, col) are the nonzero indices."""
     assert mat.ndim == 2, mat.shape
-    assert x.ndim == 1, x.shape
-    assert y.ndim == 1, y.shape
-    return _repeated_rows(x, mat.indptr, nnz=mat.nnz) * y[mat.indices]
+    assert x.ndim == y.ndim, (x.shape, y.shape)
+    xr = _repeated_rows(x, mat.indptr, nnz=mat.nnz)
+    yc = y[mat.indices]
+    out = xr * yc
+    if x.ndim == 1:
+        return out
+
+    assert x.ndim == 2, x.shape
+    return out.sum(axis=1)
 
 
 def with_data(mat: CSR, data: jnp.ndarray) -> CSR:
-    assert mat.data.shape == data.shape, (mat.shape, data.shape)
+    assert mat.data.shape == data.shape, (mat.data.shape, data.shape)
     return CSR(mat.indices, mat.indptr, data, shape=mat.shape)
 
 
@@ -78,3 +100,47 @@ def scale_rows(mat: CSR, x: jnp.ndarray) -> CSR:
 
 def scale_columns(mat: CSR, x: jnp.ndarray) -> CSR:
     return with_data(mat, mat.data * x[mat.indices])
+
+
+def sum(mat: CSR, axis: tp.Optional[int] = None):
+    if axis is None:
+        return mat.data.sum()
+    axis = canonicalize_axis(axis, mat.ndim)
+    if axis == 0:
+        segment_ids = mat.indices
+        indices_are_sorted = False
+        num_segments = mat.shape[1]
+    elif axis == 1:
+        segment_ids = rows(mat.indptr, nnz=mat.nnz)
+        indices_are_sorted = True
+        num_segments = mat.shape[0]
+    else:
+        raise ValueError(f"cannonicalized axis must be 0 or 1, got {axis}")
+    return jax.ops.segment_sum(
+        mat.data,
+        segment_ids,
+        num_segments=num_segments,
+        indices_are_sorted=indices_are_sorted,
+    )
+
+
+def softmax(mat: CSR, axis: int = -1) -> CSR:
+    return coo_lib.softmax(mat.tocoo(), axis=axis).tocsr()
+
+
+def to_coo(mat: CSR) -> coo_lib.COO:
+    row = jnp.repeat(
+        jnp.arange(mat.shape[0]), jnp.diff(mat.indptr), total_repeat_length=mat.nnz,
+    )
+    col = mat.indices
+    return coo_lib.COO(jnp.vstack([row, col]), mat.data, mat.shape)
+
+
+def symmetrize_data(mat: CSR) -> CSR:
+    return with_data(mat, coo_lib.symmetrize_data(to_coo(mat)).data)
+
+
+def get_coords(mat: CSR) -> jnp.ndarray:
+    return jnp.stack(
+        (rows(mat.indptr, dtype=mat.indices.dtype, nnz=mat.nnz), mat.indices), axis=0
+    )
