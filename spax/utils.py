@@ -1,12 +1,9 @@
-import inspect
 import typing as tp
-from functools import partial, wraps
 
 import jax
 import jax.numpy as jnp
 from jax._src.ops.scatter import _scatter_update
-
-from spax import sparse
+from jax.experimental.sparse_ops import COO
 
 
 def multiply_leading_dims(a, b):
@@ -19,78 +16,16 @@ def multiply_leading_dims(a, b):
 
 def eye(
     N: int, dtype: jnp.dtype = jnp.float32, index_dtype: jnp.dtype = jnp.int32
-) -> sparse.COO:
+) -> COO:
     return diag(jnp.ones((N,), dtype=dtype), index_dtype=index_dtype)
 
 
-def diag(diagonals: jnp.ndarray, index_dtype: jnp.dtype = jnp.int32) -> sparse.COO:
+def diag(diagonals: jnp.ndarray, index_dtype: jnp.dtype = jnp.int32) -> COO:
     """Create a matrix with `diagonals` on the main diagonal."""
     assert diagonals.ndim == 1
     n = diagonals.size
     r = jnp.arange(n, dtype=index_dtype)
-    return sparse.COO(jnp.vstack((r, r)), diagonals, (n, n))
-
-
-_FMTS = {"bsr": sparse.BSR, "coo": sparse.COO, "csr": sparse.CSR, "ell": sparse.ELL}
-
-
-def _sparse_rng(func):
-    @wraps(func)
-    def wrapped(*args, **kwargs):
-        sig = inspect.signature(func).bind(*args, **kwargs)
-        sig.apply_defaults()
-        arguments = dict(sig.arguments)
-        key = arguments.pop("key")
-        nnz = arguments["nnz"]
-        fmt = arguments["fmt"]
-
-        # TODO(jakevdp): avoid creating dense array.
-        key, key2 = jax.random.split(key)
-        mat = func(key, **arguments)
-        nnz = int(nnz * mat.size if 0 < nnz < 1 else nnz)
-
-        if nnz <= 0:
-            mat = jnp.zeros_like(mat)
-        elif nnz < mat.size:
-            mask = jax.random.shuffle(key2, jnp.arange(mat.size)).reshape(mat.shape)
-            mat = jnp.where(mask < nnz, mat, 0)
-
-        if fmt == "dense":
-            return mat
-        elif fmt in _FMTS:
-            return _FMTS[fmt].fromdense(mat)
-        else:
-            raise ValueError(f"Unrecognized format: {fmt}")
-
-    return wrapped
-
-
-@_sparse_rng
-def random_uniform(
-    key: jnp.ndarray,
-    shape: tp.Sequence[int] = (),
-    dtype: jnp.dtype = jnp.float32,
-    minval: tp.Union[float, jnp.ndarray] = 0.0,
-    maxval: tp.Union[float, jnp.ndarray] = 1.0,
-    nnz: tp.Union[int, float] = 0.1,
-    fmt: str = "csr",
-) -> sparse.SparseArray:
-    """Sparse Uniform Array"""
-    return jax.random.uniform(
-        key, shape=shape, dtype=dtype, minval=minval, maxval=maxval
-    )
-
-
-@_sparse_rng
-def random_normal(
-    key: jnp.ndarray,
-    shape: tp.Sequence[int] = (),
-    dtype: jnp.dtype = jnp.float32,
-    nnz: tp.Union[int, float] = 0.1,
-    fmt: str = "csr",
-) -> sparse.SparseArray:
-    """Sparse Normal Array"""
-    return jax.random.normal(key, shape=shape, dtype=dtype)
+    return COO((diagonals, r, r), shape=(n, n))
 
 
 def canonicalize_axis(axis: int, ndim: int) -> int:
@@ -165,34 +100,3 @@ def segment_softmax(
     data = jnp.exp(data - max_val[segment_ids])
     summed = jax.ops.segment_sum(data, segment_ids, num_segments, indices_are_sorted)
     return data / summed[segment_ids]
-
-
-def is_trace(x):
-    return isinstance(x, jax.core.Trace)
-
-
-def is_instance_or_abstract(x, concrete_cls, abstract_cls):
-    return isinstance(x, concrete_cls) or isinstance(jax.core.get_aval(x), abstract_cls)
-
-
-def _is_instance_checker(concrete_cls, abstract_cls):
-    return partial(
-        is_instance_or_abstract, concrete_cls=concrete_cls, abstract_cls=abstract_cls
-    )
-
-
-is_coo = _is_instance_checker(sparse.COO, sparse.AbstractCOO)
-is_csr = _is_instance_checker(sparse.CSR, sparse.AbstractCSR)
-is_ell = _is_instance_checker(sparse.ELL, sparse.AbstractELL)
-is_bsr = _is_instance_checker(sparse.BSR, sparse.AbstractBSR)
-
-is_sparse = _is_instance_checker(
-    sparse.SparseArray,
-    (sparse.AbstractCOO, sparse.AbstractCSR, sparse.AbstractELL, sparse.AbstractBSR),
-)
-
-_is_dense = _is_instance_checker(jnp.ndarray, jax.ShapedArray)
-
-
-def is_dense(x):
-    return not is_sparse(x) and _is_dense(x)

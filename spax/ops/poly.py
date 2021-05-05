@@ -2,29 +2,23 @@ import typing as tp
 from functools import partial
 
 import jax.numpy as jnp
+from jax.experimental.sparse_ops import COO, CSR, JAXSparse
+from spax.ops import coo, csr, dense
 
-from spax import utils
-from spax.ops import bsr, coo, csr, dense, ell
-from spax.sparse import COO, SparseArray
-
-S = tp.TypeVar("S", bound=tp.Union[SparseArray, jnp.ndarray])
+S = tp.TypeVar("S", bound=tp.Union[JAXSparse, jnp.ndarray])
 
 
-def _get_lib(mat: SparseArray):
-    if utils.is_coo(mat):
+def _get_lib(mat: JAXSparse):
+    if isinstance(mat, COO):
         return coo
-    if utils.is_bsr(mat):
-        return bsr
-    if utils.is_csr(mat):
+    if isinstance(mat, CSR):
         return csr
-    if utils.is_ell(mat):
-        return ell
-    if utils.is_dense(mat):
+    if isinstance(mat, jnp.ndarray):
         return dense
-    raise TypeError(f"Unrecognized `SparseArray` type {type(mat)}")
+    raise TypeError(f"Unsupported `JAXSparse`: {type(mat)}")
 
 
-def _delegate(mat: SparseArray, method_name: str, *args, **kwargs):
+def _delegate(mat: JAXSparse, method_name: str, *args, **kwargs):
     lib = _get_lib(mat)
     method = getattr(lib, method_name, None)
     if method is None:
@@ -32,18 +26,6 @@ def _delegate(mat: SparseArray, method_name: str, *args, **kwargs):
             f"{method_name} not implemented for format {type(mat)}"
         )
     return method(*args, **kwargs)
-
-
-def matmul(mat: SparseArray, v) -> jnp.ndarray:
-    return _delegate(mat, "matmul", mat, v)
-
-
-def transpose(mat: S, axes=None) -> S:
-    return _delegate(mat, "transpose", mat, axes=axes)
-
-
-def add(mat: S, other) -> tp.Union[S, jnp.ndarray]:
-    return _delegate(mat, "add", mat, other)
 
 
 def mul(mat: S, other) -> S:
@@ -89,12 +71,6 @@ def remainder(x1: S, x2) -> S:
     return map_data(x1, partial(jnp.remainder, x2=x2))
 
 
-def to_dense(mat: tp.Union[SparseArray, jnp.ndarray]) -> jnp.ndarray:
-    if isinstance(mat, SparseArray):
-        return mat.todense()
-    return jnp.asarray(mat)
-
-
 def scale(mat: S, value: float) -> S:
     return map_data(mat, lambda d: d * value)
 
@@ -111,15 +87,11 @@ def negate(mat: S) -> S:
     return _delegate(mat, "negate", mat)
 
 
-def subtract(mat: S, other) -> S:
-    return _delegate(mat, "subtract", mat, other)
-
-
-def sum(mat: S, axis=None) -> jnp.ndarray:
+def sum(mat: S, axis=None) -> jnp.ndarray:  # pylint: disable=redefined-builtin
     return _delegate(mat, "sum", mat, axis)
 
 
-def max(mat: S, axis=None) -> jnp.ndarray:
+def max(mat: S, axis=None) -> jnp.ndarray:  # pylint: disable=redefined-builtin
     return _delegate(mat, "max", mat, axis)
 
 
@@ -136,7 +108,9 @@ def symmetrize_data(mat: S) -> S:
 
 
 def norm(
-    mat: S, ord: tp.Union[int, str] = 2, axis: tp.Optional[int] = None
+    mat: S,
+    ord: tp.Union[int, str] = 2,  # pylint: disable=redefined-builtin
+    axis: tp.Optional[int] = None,
 ) -> jnp.ndarray:
     if axis is None:
         raise NotImplementedError("`axis` must be provided")
@@ -144,21 +118,15 @@ def norm(
         return jnp.sqrt(sum(map_data(mat, lambda d: d * d.conj()), axis=axis))
     if ord == 1:
         return sum(abs(mat), axis=axis)
-    if ord == ord == jnp.inf:
+    if ord == jnp.inf:
         return max(abs(mat), axis=axis)
-
-
-def to_dense(mat: S) -> jnp.ndarray:
-    if hasattr(mat, "todense"):
-        return mat.todense()
-    assert isinstance(mat, jnp.ndarray), type(mat)
-    return mat
+    raise NotImplementedError(f"ord {ord} not implemented")
 
 
 def cast(mat: S, dtype: jnp.ndarray):
     if mat.dtype is dtype:
         return mat
-    if utils.is_sparse(mat):
+    if isinstance(mat, JAXSparse):
         return with_data(mat, mat.data.astype(dtype))
     return mat.astype(dtype)
 
@@ -171,5 +139,51 @@ def to_coo(mat: S) -> COO:
     return _delegate(mat, "to_coo", mat)
 
 
+def to_csr(mat: S) -> CSR:
+    return _delegate(mat, "to_csr", mat)
+
+
+def to_dense(mat: S) -> jnp.ndarray:
+    if isinstance(mat, JAXSparse):
+        out = jnp.zeros(mat.shape, mat.dtype)
+        mat = to_coo(mat)
+        return out.at[mat.row, mat.col].add(mat.data)
+        # return mat.todense()
+    if isinstance(mat, jnp.ndarray):
+        return mat
+    raise TypeError(f"Invalid mat type {type(mat)}")
+
+
 def get_coords(mat: S) -> jnp.ndarray:
     return _delegate(mat, "get_coords", mat)
+
+
+def add_dense(mat: S, other: tp.Union[int, float, jnp.ndarray]):
+    other = jnp.asarray(other)
+    if other.ndim < 2:
+        other = jnp.broadcast_to(other, mat.shape)
+    mat = to_coo(mat)
+    return other.at[..., mat.row, mat.col].add(mat.data)
+
+
+def add(
+    mat: S, other: tp.Union[JAXSparse, int, float, jnp.ndarray]
+) -> tp.Union[COO, jnp.ndarray]:
+    if isinstance(mat, JAXSparse):
+        if isinstance(other, JAXSparse):
+            return coo.add_coo(to_coo(mat), to_coo(other))
+        return add_dense(mat, other)
+    assert isinstance(mat, jnp.ndarray)
+    if isinstance(other, JAXSparse):
+        return add_dense(to_coo(other), mat)
+    return mat + other
+
+
+def subtract(
+    mat: tp.Union[jnp.ndarray], other: tp.Union[JAXSparse, int, float, jnp.ndarray]
+):
+    if isinstance(other, JAXSparse):
+        other = negate(other)
+    else:
+        other = -other
+    return add(mat, other)

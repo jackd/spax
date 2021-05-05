@@ -2,9 +2,9 @@ from functools import partial
 
 import jax
 import jax.numpy as jnp
-
 from spax import ops, utils
 from spax.linalg.utils import as_array_fun, standardize_signs
+from spax.test_utils import random_uniform
 
 
 @partial(jax.jit, backend="cpu", static_argnums=2)
@@ -43,7 +43,7 @@ def random_symmetric_mat(
         a = (a + a.T) / 2
         a = a + jnp.diag(diag)
     else:
-        a = utils.random_uniform(k0, (size, size), dtype=dtype, fmt=fmt)
+        a = random_uniform(k0, (size, size), dtype=dtype, fmt=fmt)
         a = ops.symmetrize(a)
         a = ops.add(a, utils.diag(diag))
     return a

@@ -1,79 +1,42 @@
+import numpy as np
+from absl.testing import absltest, parameterized  # pylint: disable=no-name-in-module
+
 import jax
 import jax.numpy as jnp
-import numpy as np
-from absl.testing import absltest, parameterized
 from jax import test_util as jtu
 from jax.config import config
-
+from jax.experimental.sparse_ops import COO, CSR
 from spax import ops
-from spax.sparse import BSR, COO, CSR, ELL
-from spax.utils import random_uniform as _random_uniform
+from spax.test_utils import random_uniform
 
 # pylint: disable=undefined-variable
 
 config.parse_flags_with_absl()
 
-ALL_TYPES = (CSR, COO, ELL, BSR, jnp.ndarray)
-
-
-def uniform(rng, shape, density=0.2, dtype=jnp.float32, sparse_type=CSR):
-    if sparse_type == jnp.ndarray:
-        return uniform(
-            rng, shape, density=density, dtype=dtype, sparse_type=CSR
-        ).todense()
-    return _random_uniform(
-        rng,
-        shape,
-        dtype=dtype,
-        nnz=int(density * jnp.prod(jnp.asarray(shape))),
-        fmt=sparse_type.__name__.lower(),
-    )
+ALL_TYPES = (CSR, COO, jnp.ndarray)
 
 
 class SparseOpsTest(jtu.JaxTestCase):
     @parameterized.named_parameters(
         jtu.cases_from_list(
             {
-                "testcase_name": "_{}x{}_{}".format(
-                    jtu.format_shape_dtype_string(shape, dtype),
-                    (shape[-1], *extra_dims),
-                    sparse_type.__name__,
+                "testcase_name": "_{}_{}".format(
+                    jtu.format_shape_dtype_string(shape, dtype), sparse_type.__name__,
                 ),
                 "shape": shape,
                 "dtype": dtype,
                 "sparse_type": sparse_type,
-                "extra_dims": extra_dims,
             }
-            for sparse_type in ALL_TYPES
+            for sparse_type in (COO, CSR)
             for shape in ((7, 11), (1, 13), (13, 1))
             for dtype in (np.float32, np.float64)
-            for extra_dims in ((), (7,))
         )
     )
-    def test_matmul(self, shape, extra_dims, dtype, sparse_type):
-        k0, k1 = jax.random.split(jax.random.PRNGKey(0))
-        mat = uniform(k0, shape, dtype=dtype, sparse_type=sparse_type)
-        v = jax.random.uniform(k1, shape=(shape[1], *extra_dims), dtype=dtype)
-        expected = jnp.matmul(ops.to_dense(mat), v)
-        actual = ops.matmul(mat, v)
-        self.assertAllClose(actual, expected)
-
-    @parameterized.named_parameters(
-        jtu.cases_from_list(
-            {
-                "testcase_name": f"_{shape}_{sparse_type.__name__}",
-                "shape": shape,
-                "sparse_type": sparse_type,
-            }
-            for sparse_type in (COO, CSR, jnp.ndarray)
-            for shape in ((7, 11), (1, 13), (4, 4))
-        )
-    )
-    def test_transpose(self, sparse_type, shape):
-        mat = uniform(jax.random.PRNGKey(0), shape=shape, sparse_type=sparse_type)
-        actual = ops.to_dense(ops.transpose(mat))
-        expected = ops.to_dense(mat).T
-        self.assertAllClose(actual, expected)
+    def test_to_dense(self, sparse_type, shape, dtype):
+        mat = random_uniform(jax.random.PRNGKey(0), shape, dtype=dtype, fmt=jnp.ndarray)
+        sp = sparse_type.fromdense(mat)
+        redense = ops.to_dense(sp)
+        self.assertAllClose(redense, mat)
 
     @parameterized.named_parameters(
         jtu.cases_from_list(
@@ -92,8 +55,8 @@ class SparseOpsTest(jtu.JaxTestCase):
     )
     def test_add_sparse(self, sparse_type, shape, dtype):
         k0, k1 = jax.random.split(jax.random.PRNGKey(0))
-        mat0 = uniform(k0, shape, dtype=dtype, sparse_type=sparse_type)
-        mat1 = uniform(k1, shape, dtype=dtype, sparse_type=sparse_type)
+        mat0 = random_uniform(k0, shape, dtype=dtype, fmt=sparse_type)
+        mat1 = random_uniform(k1, shape, dtype=dtype, fmt=sparse_type)
         actual = ops.to_dense(ops.add(mat0, mat1))
         expected = ops.to_dense(mat0) + ops.to_dense(mat1)
         self.assertAllClose(actual, expected)
@@ -119,7 +82,7 @@ class SparseOpsTest(jtu.JaxTestCase):
     )
     def test_add_array(self, sparse_type, shape, other_rank, dtype):
         k0, k1 = jax.random.split(jax.random.PRNGKey(0))
-        mat = uniform(k0, shape, dtype=dtype, sparse_type=sparse_type)
+        mat = random_uniform(k0, shape, dtype=dtype, fmt=sparse_type)
         if other_rank > len(shape):
             shape = tuple(range(2, 2 + len(shape) - other_rank)) + shape
         else:
@@ -150,7 +113,7 @@ class SparseOpsTest(jtu.JaxTestCase):
     )
     def test_mul_array(self, sparse_type, shape, other_rank, dtype):
         k0, k1 = jax.random.split(jax.random.PRNGKey(0))
-        mat = uniform(k0, shape, dtype=dtype, sparse_type=sparse_type)
+        mat = random_uniform(k0, shape, dtype=dtype, fmt=sparse_type)
         if other_rank > len(shape):
             shape = tuple(range(2, 2 + len(shape) - other_rank)) + shape
         else:
@@ -182,7 +145,7 @@ class SparseOpsTest(jtu.JaxTestCase):
     )
     def test_masked_matmul(self, nx, ny, nh, dtype, sparse_type):
         keys = jax.random.split(jax.random.PRNGKey(0), 3)
-        mat = uniform(keys[0], (nx, ny), dtype=dtype, sparse_type=sparse_type)
+        mat = random_uniform(keys[0], (nx, ny), dtype=dtype, fmt=sparse_type)
         x = jax.random.uniform(keys[1], (nx, nh), dtype=dtype)
         y = jax.random.uniform(keys[2], (nh, ny), dtype=dtype)
 
@@ -213,7 +176,7 @@ class SparseOpsTest(jtu.JaxTestCase):
     )
     def test_masked_inner(self, nx, ny, nh, dtype, sparse_type):
         keys = jax.random.split(jax.random.PRNGKey(0), 3)
-        mat = uniform(keys[0], (nx, ny), dtype=dtype, sparse_type=sparse_type)
+        mat = random_uniform(keys[0], (nx, ny), dtype=dtype, fmt=sparse_type)
         x = jax.random.uniform(keys[1], (nh, nx), dtype=dtype)
         y = jax.random.uniform(keys[2], (nh, ny), dtype=dtype)
 
@@ -242,7 +205,7 @@ class SparseOpsTest(jtu.JaxTestCase):
     )
     def test_masked_outer(self, nx, ny, dtype, sparse_type):
         keys = jax.random.split(jax.random.PRNGKey(0), 3)
-        mat = uniform(keys[0], (nx, ny), dtype=dtype, sparse_type=sparse_type)
+        mat = random_uniform(keys[0], (nx, ny), dtype=dtype, fmt=sparse_type)
         x = jax.random.uniform(keys[1], (nx,), dtype=dtype)
         y = jax.random.uniform(keys[2], (ny,), dtype=dtype)
 
@@ -268,8 +231,8 @@ class SparseOpsTest(jtu.JaxTestCase):
         )
     )
     def test_symmetrize(self, size, dtype, sparse_type):
-        mat = uniform(
-            jax.random.PRNGKey(0), (size, size), dtype=dtype, sparse_type=sparse_type
+        mat = random_uniform(
+            jax.random.PRNGKey(0), (size, size), dtype=dtype, fmt=sparse_type
         )
         actual = ops.symmetrize(mat)
         expected = ops.to_dense(mat)
@@ -291,7 +254,7 @@ class SparseOpsTest(jtu.JaxTestCase):
         shape = (7, 11)
         dtype = jnp.float32
         k0, k1 = jax.random.split(jax.random.PRNGKey(0), 2)
-        mat = uniform(k0, shape, dtype=dtype, sparse_type=sparse_type)
+        mat = random_uniform(k0, shape, dtype=dtype, fmt=sparse_type)
         mask = jax.random.uniform(k1, (shape[axis],)) > 0.5
         expected = ops.to_dense(mat)
         if axis == 0:
@@ -316,7 +279,7 @@ class SparseOpsTest(jtu.JaxTestCase):
         shape = (7, 11)
         dtype = jnp.float32
         k0, k1 = jax.random.split(jax.random.PRNGKey(0), 2)
-        mat = uniform(k0, shape, dtype=dtype, sparse_type=sparse_type)
+        mat = random_uniform(k0, shape, dtype=dtype, fmt=sparse_type)
         mask = jax.random.uniform(k1, (shape[axis],)) > 0.5
         (indices,) = jnp.where(mask)
         del mask
@@ -342,9 +305,7 @@ class SparseOpsTest(jtu.JaxTestCase):
     def test_sum(self, sparse_type, axis):
         shape = (7, 11)
         dtype = jnp.float32
-        mat = uniform(
-            jax.random.PRNGKey(0), shape, dtype=dtype, sparse_type=sparse_type
-        )
+        mat = random_uniform(jax.random.PRNGKey(0), shape, dtype=dtype, fmt=sparse_type)
         expected = ops.sum(mat, axis=axis)
         actual = ops.to_dense(mat).sum(axis=axis)
         self.assertAllClose(actual, expected)
@@ -363,9 +324,7 @@ class SparseOpsTest(jtu.JaxTestCase):
     def test_max(self, sparse_type, axis):
         shape = (7, 11)
         dtype = jnp.float32
-        mat = uniform(
-            jax.random.PRNGKey(0), shape, dtype=dtype, sparse_type=sparse_type
-        )
+        mat = random_uniform(jax.random.PRNGKey(0), shape, dtype=dtype, fmt=sparse_type)
         expected = ops.max(mat, axis=axis)
         actual = ops.to_dense(mat).max(axis=axis)
         self.assertAllClose(actual, expected)
@@ -383,12 +342,12 @@ class SparseOpsTest(jtu.JaxTestCase):
             for ord in (1, 2, jnp.inf)
         )
     )
-    def test_norm(self, sparse_type, ord, axis):
+    def test_norm(
+        self, sparse_type, ord, axis,  # pylint: disable=redefined-builtin
+    ):
         shape = (7, 11)
         dtype = jnp.float32
-        mat = uniform(
-            jax.random.PRNGKey(0), shape, dtype=dtype, sparse_type=sparse_type
-        )
+        mat = random_uniform(jax.random.PRNGKey(0), shape, dtype=dtype, fmt=sparse_type)
         mat = ops.map_data(mat, lambda d: d - 0.5)  # make sure we have some negatives
         expected = ops.norm(mat, ord=ord, axis=axis)
         actual = jnp.linalg.norm(ops.to_dense(mat), ord=ord, axis=axis)
@@ -416,7 +375,7 @@ class SparseOpsTest(jtu.JaxTestCase):
     )
     def test_masked_outer_rank2(self, nh, nx, ny, dtype, sparse_type):
         keys = jax.random.split(jax.random.PRNGKey(0), 3)
-        mat = uniform(keys[0], (nx, ny), dtype=dtype, sparse_type=sparse_type)
+        mat = random_uniform(keys[0], (nx, ny), dtype=dtype, fmt=sparse_type)
         x = jax.random.uniform(keys[1], (nx, nh), dtype=dtype)
         y = jax.random.uniform(keys[2], (ny, nh), dtype=dtype)
 

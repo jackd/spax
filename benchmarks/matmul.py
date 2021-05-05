@@ -2,11 +2,12 @@ import typing as tp
 from functools import partial
 
 import google_benchmark as benchmark
+
 import jax
 import jax.numpy as jnp
-from jax.config import config
-
 import spax
+from jax.config import config
+from jax.experimental.sparse_ops import COO
 
 config.parse_flags_with_absl()
 config.update("jax_enable_x64", True)
@@ -25,12 +26,12 @@ def random_uniform(key, shape, dtype, nnz, fmt):
         k0, (nnz,), dtype=jnp.float32, maxval=num_elements
     ).astype(jnp.int32)
     indices = jnp.unique(indices)
-    coords = jnp.asarray(jnp.unravel_index(indices, shape))
+    row, col = jnp.unravel_index(indices, shape)
     nnz = indices.shape[0]
     data = jax.random.normal(k1, (nnz,), dtype=dtype)
-    a = spax.COO(coords, data, shape)
+    a = COO((data, row, col), shape=shape)
     if fmt == "csr":
-        a = a.tocsr()
+        a = spax.ops.to_csr(a)
     else:
         assert fmt == "coo"
     return a
@@ -42,19 +43,17 @@ def matmul_benchmark(
     shape: tp.Tuple[int, int],
     num_vecs: int,
     nnz: tp.Union[int, float],
-    backend: tp.Optional[str] = "cpu",
+    backend: str = "cpu",
     dtype=jnp.float32,
     seed: int = 0,
 ):
     ka, kx = jax.random.split(jax.random.PRNGKey(seed))
     a = random_uniform(ka, shape=shape, dtype=dtype, nnz=nnz, fmt=fmt)
-    b = jax.random.normal(kx, (shape[1], num_vecs))
+    b = jax.random.normal(kx, (shape[1], num_vecs), dtype=dtype)
 
+    @partial(jax.jit, backend=backend)
     def fun(a, b):
-        return spax.ops.matmul(a, b)
-
-    if backend:
-        fun = jax.jit(fun, backend=backend)
+        return a @ b
 
     fun(a, b).block_until_ready()  # ensure jit has finished
     while state:
@@ -65,8 +64,7 @@ large_kwargs = dict(shape=(int(1e4), int(1e4)), num_vecs=8, nnz=0.01)
 
 for size, size_str in ((large_kwargs, "large"),):
     for dtype, dtype_str in ((jnp.float32, "f32"), (jnp.float64, "f64")):
-        for backend in (None, "cpu", "gpu"):
-            backend_str = "nojit" if backend is None else backend
+        for backend in ("cpu", "gpu"):
             for fmt in "csr", "coo":
                 benchmark.register(
                     partial(
@@ -76,7 +74,7 @@ for size, size_str in ((large_kwargs, "large"),):
                         backend=backend,
                         **large_kwargs
                     ),
-                    name="-".join((size_str, dtype_str, backend_str, fmt)),
+                    name="-".join((size_str, dtype_str, backend, fmt)),
                 )
 
 

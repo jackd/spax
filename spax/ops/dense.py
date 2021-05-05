@@ -1,25 +1,5 @@
 import jax.numpy as jnp
-
 from spax.utils import canonicalize_axis
-
-
-def matmul(mat: jnp.ndarray, v) -> jnp.ndarray:
-    assert mat.shape[-1] == v.shape[0], (mat.shape, v.shape)
-    ms = mat.shape
-    vs = v.shape
-    out = mat.reshape(-1, ms[-1]) @ v.reshape(vs[0], -1)
-    return out.reshape(*ms[:-1], *vs[1:])
-    # return mat @ v
-
-
-def transpose(mat: jnp.ndarray, axes=None) -> jnp.ndarray:
-    return jnp.transpose(mat, axes=axes)
-
-
-def add(mat: jnp.ndarray, other) -> jnp.ndarray:
-    if hasattr(other, "todense"):
-        other = other.todense()
-    return mat + other
 
 
 def mul(mat: jnp.ndarray, other) -> jnp.ndarray:
@@ -31,7 +11,7 @@ def symmetrize(mat: jnp.ndarray) -> jnp.ndarray:
 
 
 def masked_inner(mat: jnp.ndarray, x: jnp.ndarray, y: jnp.ndarray) -> jnp.ndarray:
-    return masked_data(mat, matmul(x.T, y))
+    return masked_data(mat, x.T @ y)
 
 
 def masked_outer(mat: jnp.ndarray, x, y) -> jnp.ndarray:
@@ -65,11 +45,15 @@ def negate(mat: jnp.ndarray) -> jnp.ndarray:
     return -mat
 
 
-def sum(mat: jnp.ndarray, axis=None) -> jnp.ndarray:
+def sum(  # pylint: disable=redefined-builtin
+    mat: jnp.ndarray, axis=None
+) -> jnp.ndarray:
     return mat.sum(axis)
 
 
-def max(mat: jnp.ndarray, axis=None) -> jnp.ndarray:
+def max(  # pylint: disable=redefined-builtin
+    mat: jnp.ndarray, axis=None
+) -> jnp.ndarray:
     return mat.max(axis)
 
 

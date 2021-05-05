@@ -1,17 +1,17 @@
 from functools import partial
 
+import numpy as np
+from absl.testing import absltest  # pylint: disable=no-name-in-module
+
 import jax
 import jax.numpy as jnp
-import numpy as np
-from absl.testing import absltest
 from jax import test_util as jtu
 from jax.config import config
-
+from jax.experimental.sparse_ops import COO, CSR
 from spax import ops
 from spax.linalg import eigh_vjp as vjp_lib
 from spax.linalg.utils import standardize_signs
-from spax.sparse import COO, CSR
-from spax.utils import random_uniform
+from spax.test_utils import random_uniform
 
 config.parse_flags_with_absl()
 config.update("jax_enable_x64", True)
