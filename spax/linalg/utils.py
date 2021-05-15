@@ -1,7 +1,7 @@
+import operator
+
 import jax
 import jax.numpy as jnp
-
-from spax import is_sparse, ops
 from spax.types import ArrayFun, ArrayOrFun
 
 
@@ -43,12 +43,8 @@ def rayleigh_quotient(v, av):
 def as_array_fun(a: ArrayOrFun) -> ArrayFun:
     if callable(a):
         return a
-    assert a.ndim == 2, a.shape
-    if is_sparse(a):
-        return jax.tree_util.Partial(ops.matmul, a)
-    if isinstance(a, jnp.ndarray):
-        return jax.tree_util.Partial(jnp.matmul, a)
-    raise TypeError(f"a must be a callable, jax array or SparseArray, got {a}")
+    assert hasattr(a, "__matmul__"), a
+    return jax.tree_util.Partial(operator.matmul, a)
 
 
 def _deflate_mat(a: jnp.ndarray, s: float, u: jnp.ndarray) -> jnp.ndarray:

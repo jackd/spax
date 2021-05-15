@@ -59,4 +59,6 @@ __all__ = [
     "to_csr",
     "to_dense",
     "with_data",
+    "csr",
+    "coo",
 ]

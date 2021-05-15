@@ -87,3 +87,28 @@ def coo_matvec_jvp(primals, tangents, *, shape, transpose=False):
 
 
 jax.ad.primitive_jvps[sparse_ops.coo_matvec_p] = coo_matvec_jvp
+
+
+def _asarray(x):
+    return (
+        x
+        if isinstance(x, (jax.core.ShapedArray, jax.api.ShapeDtypeStruct))
+        else jax.numpy.asarray(x)
+    )
+
+
+def _coo_init(self, args, *, shape):
+    self.data, self.row, self.col = map(_asarray, args,)
+    sparse_ops.JAXSparse.__init__(self, args, shape=shape)
+
+
+sparse_ops.COO.__init__ = _coo_init
+
+
+def _csx_init(self, args, *, shape):
+    self.data, self.indices, self.indptr = map(_asarray, args)
+    sparse_ops.JAXSparse.__init__(self, args, shape=shape)
+
+
+sparse_ops.CSR.__init__ = _csx_init
+sparse_ops.CSC.__init__ = _csx_init

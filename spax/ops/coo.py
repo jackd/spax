@@ -1,14 +1,30 @@
 import typing as tp
 from functools import partial
 
+import numpy as np
+
 import jax
 import jax.numpy as jnp
+from jax.config import config as jax_config
 from jax.experimental.sparse_ops import COO, CSR
 from spax.utils import canonicalize_axis, segment_max, segment_softmax
 
 
 def indices_1d(row: jnp.ndarray, col: jnp.ndarray, shape) -> jnp.ndarray:
-    return jnp.ravel_multi_index((row, col), shape, mode="clip")
+    if np.prod(np.asarray(shape, dtype=np.int64)) > np.iinfo(np.int32).max:
+        if jax_config.x64_enabled:
+            row = row.astype(jnp.int64)
+            col = col.astype(jnp.int64)
+        else:
+            raise ValueError(
+                "Overflow likely. Enable x64 for this operation with "
+                "`jax.experimental.enable_x64` context."
+            )
+    return jnp.ravel_multi_index(
+        (row.astype(jnp.int64), col.astype(jnp.int64)),
+        jnp.asarray(shape, dtype=jnp.int64),
+        mode="clip",
+    )
 
 
 def reorder_perm(row: jnp.ndarray, col: jnp.ndarray, shape) -> jnp.ndarray:
@@ -183,7 +199,7 @@ def _boolean_mask(
     data = mat.data[valid]
     shape = list(mat.shape)
     shape[axis] = valid_indices.size
-    return COO((data, *coords), shape=shape)
+    return COO((data, *coords), shape=tuple(shape))
 
 
 def boolean_mask(mat: COO, mask: jnp.ndarray, axis: int = 0):
