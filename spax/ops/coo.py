@@ -1,12 +1,12 @@
 import typing as tp
 from functools import partial
 
-import numpy as np
-
 import jax
 import jax.numpy as jnp
+import numpy as np
 from jax.config import config as jax_config
 from jax.experimental.sparse_ops import COO, CSR
+
 from spax.utils import canonicalize_axis, segment_max, segment_softmax
 
 
@@ -15,16 +15,13 @@ def indices_1d(row: jnp.ndarray, col: jnp.ndarray, shape) -> jnp.ndarray:
         if jax_config.x64_enabled:
             row = row.astype(jnp.int64)
             col = col.astype(jnp.int64)
+            shape = jnp.asarray(shape, dtype=jnp.int64)
         else:
             raise ValueError(
                 "Overflow likely. Enable x64 for this operation with "
                 "`jax.experimental.enable_x64` context."
             )
-    return jnp.ravel_multi_index(
-        (row.astype(jnp.int64), col.astype(jnp.int64)),
-        jnp.asarray(shape, dtype=jnp.int64),
-        mode="clip",
-    )
+    return jnp.ravel_multi_index((row, col), shape, mode="clip",)
 
 
 def reorder_perm(row: jnp.ndarray, col: jnp.ndarray, shape) -> jnp.ndarray:
@@ -237,3 +234,11 @@ def to_csr(coo: COO) -> CSR:
     indptr = jnp.zeros(nrows + 1, coo.row.dtype)
     indptr = indptr.at[1:].set(jnp.cumsum(jnp.bincount(coo.row, length=nrows)))
     return CSR((coo.data, coo.col, indptr), shape=coo.shape)
+
+
+def to_dense(coo: COO) -> jnp.ndarray:
+    return (
+        jnp.zeros(coo.shape, coo.dtype)
+        .at[coo.row, coo.col]
+        .set(jnp.ones((coo.nnz,), dtype=coo.dtype))
+    )

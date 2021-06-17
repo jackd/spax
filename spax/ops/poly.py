@@ -3,6 +3,7 @@ from functools import partial
 
 import jax.numpy as jnp
 from jax.experimental.sparse_ops import COO, CSR, JAXSparse
+
 from spax.ops import coo, csr, dense
 
 S = tp.TypeVar("S", bound=tp.Union[JAXSparse, jnp.ndarray])
@@ -145,10 +146,7 @@ def to_csr(mat: S) -> CSR:
 
 def to_dense(mat: S) -> jnp.ndarray:
     if isinstance(mat, JAXSparse):
-        out = jnp.zeros(mat.shape, mat.dtype)
-        mat = to_coo(mat)
-        return out.at[mat.row, mat.col].add(mat.data)
-        # return mat.todense()
+        return coo.to_dense(to_coo(mat))
     if isinstance(mat, jnp.ndarray):
         return mat
     raise TypeError(f"Invalid mat type {type(mat)}")
