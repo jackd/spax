@@ -2,6 +2,7 @@ from functools import partial
 
 import jax
 import jax.numpy as jnp
+
 from spax import ops, utils
 from spax.linalg.utils import as_array_fun, standardize_signs
 from spax.test_utils import random_uniform

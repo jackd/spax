@@ -1,13 +1,13 @@
 from functools import partial
 
-import numpy as np
-from absl.testing import absltest  # pylint: disable=no-name-in-module
-
 import jax
 import jax.numpy as jnp
+import numpy as np
+from absl.testing import absltest  # pylint: disable=no-name-in-module
 from jax import test_util as jtu
 from jax.config import config
 from jax.experimental.sparse_ops import COO, CSR
+
 from spax import ops
 from spax.linalg import eigh_vjp as vjp_lib
 from spax.linalg.utils import standardize_signs

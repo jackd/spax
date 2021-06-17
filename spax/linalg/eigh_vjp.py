@@ -1,5 +1,6 @@
 import jax
 import jax.numpy as jnp
+
 from spax import ops, utils
 from spax.linalg.solve import cg_least_squares
 from spax.linalg.utils import as_array_fun

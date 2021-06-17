@@ -2,6 +2,7 @@ import operator
 
 import jax
 import jax.numpy as jnp
+
 from spax.types import ArrayFun, ArrayOrFun
 
 

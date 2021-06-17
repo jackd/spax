@@ -5,6 +5,7 @@ from functools import wraps
 import jax
 import jax.numpy as jnp
 from jax.experimental.sparse_ops import COO, CSR, JAXSparse
+
 from spax.ops import to_csr
 
 _FMTS = {"coo": COO, "csr": CSR}

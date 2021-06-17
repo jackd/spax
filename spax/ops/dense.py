@@ -1,4 +1,5 @@
 import jax.numpy as jnp
+
 from spax.utils import canonicalize_axis
 
 

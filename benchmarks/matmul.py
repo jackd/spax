@@ -2,12 +2,12 @@ import typing as tp
 from functools import partial
 
 import google_benchmark as benchmark
-
 import jax
 import jax.numpy as jnp
-import spax
 from jax.config import config
 from jax.experimental.sparse_ops import COO
+
+import spax
 
 config.parse_flags_with_absl()
 config.update("jax_enable_x64", True)

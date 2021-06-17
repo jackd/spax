@@ -2,8 +2,9 @@ import typing as tp
 
 import jax
 import jax.numpy as jnp
-import spax.ops.coo as coo_lib
 from jax.experimental.sparse_ops import COO, CSR
+
+import spax.ops.coo as coo_lib
 from spax.utils import canonicalize_axis
 
 
