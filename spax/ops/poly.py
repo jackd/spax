@@ -2,7 +2,7 @@ import typing as tp
 from functools import partial
 
 import jax.numpy as jnp
-from jax.experimental.sparse_ops import COO, CSR, JAXSparse
+from jax.experimental.sparse.ops import COO, CSR, JAXSparse
 
 from spax.ops import coo, csr, dense
 

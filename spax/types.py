@@ -1,7 +1,7 @@
 import typing as tp
 
 import jax.numpy as jnp
-from jax.experimental.sparse_ops import JAXSparse
+from jax.experimental.sparse.ops import JAXSparse
 
 ArrayFun = tp.Callable[[jnp.ndarray], jnp.ndarray]
 ArrayOrFun = tp.Union[ArrayFun, jnp.ndarray, JAXSparse]

@@ -1,19 +1,20 @@
 import jax
-from jax.experimental import sparse_ops
+from jax.experimental.sparse import ops
+from jax.interpreters.partial_eval import Zero
 
 
 def _grad_components(aval: jax.ShapedArray, *pairs):
     def grad_component(x, fn):
-        return None if isinstance(x, jax.ad_util.Zero) else fn()
+        return None if isinstance(x, Zero) else fn()
 
     components = (grad_component(*pair) for pair in pairs)
     components = [c for c in components if c is not None]
     if components:
         return sum(components)
-    return jax.ad.Zero(aval)
+    return Zero(aval)
 
 
-_csr_matmat = sparse_ops.csr_matmat_p.impl
+_csr_matmat = ops.csr_matmat_p.impl
 
 
 def csr_matmat_jvp(primals, tangents, *, shape, transpose=False):
@@ -29,9 +30,9 @@ def csr_matmat_jvp(primals, tangents, *, shape, transpose=False):
     return result, grad
 
 
-jax.ad.primitive_jvps[sparse_ops.csr_matmat_p] = csr_matmat_jvp
+jax.ad.primitive_jvps[ops.csr_matmat_p] = csr_matmat_jvp
 
-_csr_matvec = sparse_ops.csr_matvec_p.impl
+_csr_matvec = ops.csr_matvec_p.impl
 
 
 def csr_matvec_jvp(primals, tangents, *, shape, transpose=False):
@@ -48,10 +49,10 @@ def csr_matvec_jvp(primals, tangents, *, shape, transpose=False):
     return result, grad
 
 
-jax.ad.primitive_jvps[sparse_ops.csr_matvec_p] = csr_matvec_jvp
+jax.ad.primitive_jvps[ops.csr_matvec_p] = csr_matvec_jvp
 
 
-_coo_matmat = sparse_ops.coo_matmat_p.impl
+_coo_matmat = ops.coo_matmat_p.impl
 
 
 def coo_matmat_jvp(primals, tangents, *, shape, transpose=False):
@@ -67,9 +68,9 @@ def coo_matmat_jvp(primals, tangents, *, shape, transpose=False):
     return result, grad
 
 
-jax.ad.primitive_jvps[sparse_ops.coo_matmat_p] = coo_matmat_jvp
+jax.ad.primitive_jvps[ops.coo_matmat_p] = coo_matmat_jvp
 
-_coo_matvec = sparse_ops.coo_matvec_p.impl
+_coo_matvec = ops.coo_matvec_p.impl
 
 
 def coo_matvec_jvp(primals, tangents, *, shape, transpose=False):
@@ -86,7 +87,7 @@ def coo_matvec_jvp(primals, tangents, *, shape, transpose=False):
     return result, grad
 
 
-jax.ad.primitive_jvps[sparse_ops.coo_matvec_p] = coo_matvec_jvp
+jax.ad.primitive_jvps[ops.coo_matvec_p] = coo_matvec_jvp
 
 
 def _asarray(x):
@@ -99,16 +100,16 @@ def _asarray(x):
 
 def _coo_init(self, args, *, shape):
     self.data, self.row, self.col = map(_asarray, args,)
-    sparse_ops.JAXSparse.__init__(self, args, shape=shape)
+    ops.JAXSparse.__init__(self, args, shape=shape)
 
 
-sparse_ops.COO.__init__ = _coo_init
+ops.COO.__init__ = _coo_init
 
 
 def _csx_init(self, args, *, shape):
     self.data, self.indices, self.indptr = map(_asarray, args)
-    sparse_ops.JAXSparse.__init__(self, args, shape=shape)
+    ops.JAXSparse.__init__(self, args, shape=shape)
 
 
-sparse_ops.CSR.__init__ = _csx_init
-sparse_ops.CSC.__init__ = _csx_init
+ops.CSR.__init__ = _csx_init
+ops.CSC.__init__ = _csx_init

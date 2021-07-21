@@ -5,7 +5,7 @@ import typing as tp
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jax.experimental.sparse_ops import JAXSparse
+from jax.experimental.sparse.ops import COO, JAXSparse
 
 
 def _is_complex_dtype(dtype: jnp.dtype) -> bool:
@@ -218,8 +218,9 @@ class Product(LinearOperator):
 
 @jax.tree_util.register_pytree_node_class
 class Sum(LinearOperator):
-    def __init__(self, *args):
+    def __init__(self, *args, is_self_adjoint: tp.Optional[bool] = None):
         assert len(args) > 0
+        self._is_self_adjoint = is_self_adjoint
         args = tuple(
             itertools.chain(
                 *(arg.terms if isinstance(arg, Sum) else (arg,) for arg in args)
@@ -232,17 +233,18 @@ class Sum(LinearOperator):
         self.terms = args
         assert len(args) > 0
 
-    @classmethod
-    def tree_unflatten(cls, aux_data, children):
-        assert not aux_data
-        return Sum(*children)
-
-    def tree_flatten(self):
-        return self.terms, None
-
     @property
     def is_self_adjoint(self) -> bool:
-        return all(term.is_self_adjoint for term in self.terms)
+        if self._is_self_adjoint is None:
+            self._is_self_adjoint = all(term.is_self_adjoint for term in self.terms)
+        return self._is_self_adjoint
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        return Sum(*children, **aux_data)
+
+    def tree_flatten(self):
+        return self.terms, dict(is_self_adjoint=self._is_self_adjoint)
 
     @property
     def shape(self) -> tp.Tuple[int, ...]:
@@ -260,7 +262,9 @@ class Sum(LinearOperator):
 
     @property
     def adjoint(self) -> LinearOperator:
-        return Sum(*(term.adjoint for term in self.terms))
+        if self.is_self_adjoint:
+            return self
+        return Sum(*(term.adjoint for term in self.terms), is_self_adjoint=False)
 
 
 @jax.tree_util.register_pytree_node_class
@@ -468,3 +472,36 @@ def symmetric_inverse(
             *(symmetric_inverse(f, **cg_kwargs) for f in operator.factors[-1::-1])
         )
     return SelfAdjointInverse(operator, **cg_kwargs)
+
+
+def scatter_limit_split(mat: COO, is_self_adjoint: bool = False) -> LinearOperator:
+    """
+    Get a linear operator that overcomes the scatter limit.
+
+    By default `jax.lax.scatter` based ops (including `COO.__matmul__`) are limited to
+    indices with size <= np.iinfo(np.int32).max == 2147483647. This overcomes that by
+    creating a linear operator consisting of a sum.
+    """
+    size = mat.data.size
+    max_size = np.iinfo(np.int32).max
+    if size <= max_size:
+        return MatrixWrapper(mat, is_self_adjoint=is_self_adjoint)
+    leading = size - size % max_size
+    data, data_rem = jnp.split(mat.data, (leading,))
+    row, row_rem = jnp.split(mat.row, (leading,))
+    col, col_rem = jnp.split(mat.col, (leading,))
+
+    shape = mat.shape
+    num_splits = size // max_size
+
+    terms = [
+        COO((d, r, c), shape=shape)
+        for d, r, c in zip(
+            jnp.split(data, num_splits),
+            jnp.split(row, num_splits),
+            jnp.split(col, num_splits),
+        )
+    ]
+    terms.append(COO((data_rem, row_rem, col_rem), shape=shape))
+    print(f"scatter_limit_split gives {len(terms)}-term sum")
+    return Sum(*terms, is_self_adjoint=is_self_adjoint)

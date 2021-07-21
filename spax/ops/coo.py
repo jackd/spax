@@ -5,7 +5,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from jax.config import config as jax_config
-from jax.experimental.sparse_ops import COO, CSR
+from jax.experimental.sparse.ops import COO, CSR
 
 from spax.utils import canonicalize_axis, segment_max, segment_softmax
 
@@ -237,8 +237,5 @@ def to_csr(coo: COO) -> CSR:
 
 
 def to_dense(coo: COO) -> jnp.ndarray:
-    return (
-        jnp.zeros(coo.shape, coo.dtype)
-        .at[coo.row, coo.col]
-        .set(jnp.ones((coo.nnz,), dtype=coo.dtype))
-    )
+    # use add instead of set in case coo has duplicates
+    return jnp.zeros(coo.shape, coo.dtype).at[coo.row, coo.col].add(coo.data)

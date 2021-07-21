@@ -5,7 +5,7 @@ import google_benchmark as benchmark
 import jax
 import jax.numpy as jnp
 from jax.config import config
-from jax.experimental.sparse_ops import COO
+from jax.experimental.sparse.ops import COO
 
 import spax
 

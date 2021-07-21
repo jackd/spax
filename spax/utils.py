@@ -3,7 +3,7 @@ import typing as tp
 import jax
 import jax.numpy as jnp
 from jax._src.ops.scatter import _scatter_update
-from jax.experimental.sparse_ops import COO
+from jax.experimental.sparse.ops import COO
 
 
 def multiply_leading_dims(a, b):
