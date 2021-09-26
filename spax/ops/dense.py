@@ -1,4 +1,5 @@
 import jax.numpy as jnp
+from jax.experimental.sparse import COO
 
 from spax.utils import canonicalize_axis
 
@@ -75,3 +76,11 @@ def gather(mat: jnp.ndarray, indices: jnp.ndarray, axis: int = 0):
 def with_data(mat: jnp.ndarray, data: jnp.ndarray) -> jnp.ndarray:
     ids = jnp.where(mat != 0)
     return jnp.zeros(mat.shape, data.dtype).at[ids].set(data)
+
+
+def to_coo(mat: jnp.ndarray) -> COO:
+    assert mat.ndim == 2
+    i, j = jnp.where(mat)
+    values = mat[i, j]
+    return COO((values, i, j), shape=mat.shape)
+    # return COO.fromdense(mat)

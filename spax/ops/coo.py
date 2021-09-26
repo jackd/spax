@@ -239,3 +239,7 @@ def to_csr(coo: COO) -> CSR:
 def to_dense(coo: COO) -> jnp.ndarray:
     # use add instead of set in case coo has duplicates
     return jnp.zeros(coo.shape, coo.dtype).at[coo.row, coo.col].add(coo.data)
+
+
+def transpose(coo: COO) -> jnp.ndarray:
+    return reorder(COO((coo.data, coo.col, coo.row), shape=coo.shape[-1::-1]))

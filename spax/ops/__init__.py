@@ -27,6 +27,7 @@ from .poly import (  # pylint: disable=redefined-builtin
     to_coo,
     to_csr,
     to_dense,
+    transpose,
     with_data,
 )
 
@@ -58,6 +59,7 @@ __all__ = [
     "to_coo",
     "to_csr",
     "to_dense",
+    "transpose",
     "with_data",
     "csr",
     "coo",

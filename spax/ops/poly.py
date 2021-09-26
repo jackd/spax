@@ -6,7 +6,7 @@ from jax.experimental.sparse.ops import COO, CSR, JAXSparse
 
 from spax.ops import coo, csr, dense
 
-S = tp.TypeVar("S", bound=tp.Union[JAXSparse, jnp.ndarray])
+S = tp.Union[JAXSparse, jnp.ndarray]
 
 
 def _get_lib(mat: JAXSparse):
@@ -177,11 +177,15 @@ def add(
     return mat + other
 
 
-def subtract(
-    mat: tp.Union[jnp.ndarray], other: tp.Union[JAXSparse, int, float, jnp.ndarray]
-):
+def subtract(mat: S, other: tp.Union[JAXSparse, int, float, jnp.ndarray]):
     if isinstance(other, JAXSparse):
         other = negate(other)
     else:
         other = -other
     return add(mat, other)
+
+
+def transpose(mat: S):
+    if isinstance(mat, jnp.ndarray):
+        return mat.T
+    return coo.transpose(to_coo(mat))
