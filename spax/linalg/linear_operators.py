@@ -343,7 +343,10 @@ class Identity(LinearOperator):
 @jax.tree_util.register_pytree_node_class
 class Scale(LinearOperator):
     def __init__(
-        self, scale: tp.Union[int, float, jnp.ndarray], *, size: int,
+        self,
+        scale: tp.Union[int, float, jnp.ndarray],
+        *,
+        size: int,
     ):
         self._scale = scale
         self._size = size

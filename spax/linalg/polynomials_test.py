@@ -93,7 +93,12 @@ class PolyTest(jtu.JaxTestCase):
         poly_dim = 7
         rng = np.random.default_rng(0)
         roots = rng.normal(size=(poly_dim,)).astype(dtype)
-        x = rng.normal(size=(m, nx,)).astype(dtype)
+        x = rng.normal(
+            size=(
+                m,
+                nx,
+            )
+        ).astype(dtype)
         A = rng.normal(size=(m, m)).astype(dtype)
 
         coeffs = poly.roots_to_coeffs(roots)

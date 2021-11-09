@@ -21,7 +21,11 @@ def indices_1d(row: jnp.ndarray, col: jnp.ndarray, shape) -> jnp.ndarray:
                 "Overflow likely. Enable x64 for this operation with "
                 "`jax.experimental.enable_x64` context."
             )
-    return jnp.ravel_multi_index((row, col), shape, mode="clip",)
+    return jnp.ravel_multi_index(
+        (row, col),
+        shape,
+        mode="clip",
+    )
 
 
 def reorder_perm(row: jnp.ndarray, col: jnp.ndarray, shape) -> jnp.ndarray:

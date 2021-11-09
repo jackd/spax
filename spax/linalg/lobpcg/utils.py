@@ -149,7 +149,10 @@ def rayleigh_ritz(
 
 
 def svqb(
-    B: ArrayOrFun, U: jnp.ndarray, tau_replace: float, largest: bool = False,
+    B: ArrayOrFun,
+    U: jnp.ndarray,
+    tau_replace: float,
+    largest: bool = False,
 ) -> jnp.ndarray:
     """
     Orthonormalization algorithm using SVD proposed by Stathopolous and Wu.
@@ -241,7 +244,11 @@ def _rayleigh_ritz_modified(theta, z_full, nx, nc):
 
 
 def rayleigh_ritz_modified_ortho(
-    S: jnp.ndarray, A: ArrayOrFun, nx: int, nc: int, largest: bool = False,
+    S: jnp.ndarray,
+    A: ArrayOrFun,
+    nx: int,
+    nc: int,
+    largest: bool = False,
 ) -> tp.Tuple[jnp.ndarray, jnp.ndarray]:
     SAS = S.T @ as_array_fun(A)(S)
     theta, Z = eigh(SAS, largest=largest)

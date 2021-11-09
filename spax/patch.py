@@ -99,7 +99,10 @@ def _asarray(x):
 
 
 def _coo_init(self, args, *, shape):
-    self.data, self.row, self.col = map(_asarray, args,)
+    self.data, self.row, self.col = map(
+        _asarray,
+        args,
+    )
     ops.JAXSparse.__init__(self, args, shape=shape)
 
 

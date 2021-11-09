@@ -21,7 +21,8 @@ class SparseOpsTest(jtu.JaxTestCase):
         jtu.cases_from_list(
             {
                 "testcase_name": "_{}_{}".format(
-                    jtu.format_shape_dtype_string(shape, dtype), sparse_type.__name__,
+                    jtu.format_shape_dtype_string(shape, dtype),
+                    sparse_type.__name__,
                 ),
                 "shape": shape,
                 "dtype": dtype,
@@ -42,7 +43,8 @@ class SparseOpsTest(jtu.JaxTestCase):
         jtu.cases_from_list(
             {
                 "testcase_name": "_{}_{}".format(
-                    jtu.format_shape_dtype_string(shape, dtype), sparse_type.__name__,
+                    jtu.format_shape_dtype_string(shape, dtype),
+                    sparse_type.__name__,
                 ),
                 "shape": shape,
                 "dtype": dtype,
@@ -343,7 +345,10 @@ class SparseOpsTest(jtu.JaxTestCase):
         )
     )
     def test_norm(
-        self, sparse_type, ord, axis,  # pylint: disable=redefined-builtin
+        self,
+        sparse_type,
+        ord,
+        axis,  # pylint: disable=redefined-builtin
     ):
         shape = (7, 11)
         dtype = jnp.float32

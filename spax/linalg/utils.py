@@ -64,7 +64,11 @@ def _eval_defalted(
     return a(x) - s * u @ (u.T @ x)
 
 
-def _deflate_fun(a: ArrayFun, s: float, u: jnp.ndarray,) -> ArrayFun:
+def _deflate_fun(
+    a: ArrayFun,
+    s: float,
+    u: jnp.ndarray,
+) -> ArrayFun:
     """Get the matrix function `lambda x: a(x) - s * u @ u.T @ x`."""
     return jax.tree_util.Partial(_eval_defalted, a, s, u)
 
