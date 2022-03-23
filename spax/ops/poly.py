@@ -9,7 +9,7 @@ from spax.ops import coo, csr, dense
 S = tp.Union[JAXSparse, jnp.ndarray]
 
 
-def _get_lib(mat: JAXSparse):
+def _get_lib(mat: S):
     if isinstance(mat, COO):
         return coo
     if isinstance(mat, CSR):
@@ -19,7 +19,7 @@ def _get_lib(mat: JAXSparse):
     raise TypeError(f"Unsupported `JAXSparse`: {type(mat)}")
 
 
-def _delegate(mat: JAXSparse, method_name: str, *args, **kwargs):
+def _delegate(mat: S, method_name: str, *args, **kwargs):
     lib = _get_lib(mat)
     method = getattr(lib, method_name, None)
     if method is None:
@@ -56,6 +56,7 @@ def with_data(mat: S, data: jnp.ndarray) -> S:
 def map_data(mat: S, fun: tp.Callable[[jnp.ndarray], jnp.ndarray]) -> S:
     if hasattr(mat, "data"):
         return with_data(mat, fun(mat.data))
+    assert isinstance(mat, jnp.ndarray)
     mask = mat != 0
     return mat.at[mask].set(fun(mat[mask]))
 

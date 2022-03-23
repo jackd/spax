@@ -45,6 +45,13 @@ class LinearOperator(abc.ABC):
         assert isinstance(other, LinearOperator)
         return Sum(self, other)
 
+    def __sub__(self, other):
+        assert isinstance(other, LinearOperator)
+        return self + (-other)
+
+    def __neg__(self):
+        return Scaled(self, -1)
+
     def __matmul__(self, x):
         if isinstance(x, jnp.ndarray):
             return self._matmul(x)
@@ -71,8 +78,8 @@ class LinearOperator(abc.ABC):
 @jax.tree_util.register_pytree_node_class
 class MatrixWrapper(LinearOperator):
     def __init__(self, A, *, is_self_adjoint: bool = False):
-        for attr in "__matmul__", "shape", "dtype":
-            assert hasattr(A, attr), attr
+        # for attr in "__matmul__", "shape", "dtype":
+        #     assert hasattr(A, attr), (A, attr)
         self.A = A
         self._is_self_adjoint = is_self_adjoint
 
@@ -176,7 +183,7 @@ class Product(LinearOperator):
             )
         )
         for i, arg in enumerate(args):
-            assert hasattr(arg, "__matmul__"), i
+            assert hasattr(arg, "__matmul__"), (i, arg)
         for i in range(len(args) - 1):
             assert args[i].shape[-1] == args[i + 1].shape[0], (
                 i,
@@ -341,6 +348,35 @@ class Identity(LinearOperator):
 
 
 @jax.tree_util.register_pytree_node_class
+class Scaled(LinearOperator):
+    def __init__(self, base: LinearOperator, factor: tp.Union[int, float]):
+        self.base = base
+        self.factor = factor
+
+    def tree_flatten(self):
+        return (self.base,), {"factor": self.factor}
+
+    @property
+    def shape(self):
+        return self.base.shape
+
+    @property
+    def ndim(self):
+        return self.base.ndim
+
+    @property
+    def dtype(self):
+        return self.base.dtype
+
+    def _matmul(self, x):
+        return (self.base @ x) * self.factor
+
+    @property
+    def is_self_adjoint(self) -> bool:
+        return self.base.is_self_adjoint
+
+
+@jax.tree_util.register_pytree_node_class
 class Scale(LinearOperator):
     def __init__(
         self,
@@ -437,7 +473,42 @@ class HStacked(LinearOperator):
         )
 
 
+@jax.tree_util.register_pytree_node_class
+class OuterProduct(LinearOperator):
+    def __init__(self, x: jnp.ndarray):
+        assert x.ndim in (1, 2), x.ndim
+        self.x = x
+
+    def tree_flatten(self):
+        return (self.x,), {}
+
+    def _matmul(self, x):
+        if self.x.ndim == 2:
+            return self.x @ (self.x.T @ x)
+        return jnp.dot(self.x, x) * self.x
+
+    @property
+    def dtype(self) -> jnp.dtype:
+        return self.x.dtype
+
+    @property
+    def shape(self) -> tp.Tuple[int, ...]:
+        return (self.x.shape[0],) * 2
+
+    @property
+    def ndim(self) -> int:
+        return 2
+
+    @property
+    def is_self_adjoint(self) -> bool:
+        return True
+
+
 def take(A, indices):
+    if isinstance(A, MatrixWrapper):
+        return MatrixWrapper(A.A[indices])
+    if isinstance(A, Product):
+        return Product(take(A.factors[0], indices), *A.factors[1:])
     return Product(Take(indices, input_size=A.shape[0], dtype=A.dtype), A)
 
 
